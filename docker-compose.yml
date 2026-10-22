@@ -1,5 +1,4 @@
 services:
-  # === n8n workflow automation (restored after accidental removal) ===
   n8n:
     image: n8nio/n8n
     container_name: n8n
@@ -25,10 +24,6 @@ services:
       postgres:
         condition: service_healthy
 
-  # PostgreSQL ранее жил в compose-проекте n8n. Перенесён сюда, чтобы
-  # youtube_transcribe и n8n использовали один сервер БД.
-  # Том external, чтобы сохранить все существующие данные
-  # (youtube_tracker, AS_news, bybit_trader).
   postgres:
     image: postgres:15
     container_name: postgres
@@ -49,11 +44,8 @@ services:
       start_period: 10s
     networks:
       - default
-      # n8n по-прежнему подключается к postgres по имени хоста "postgres",
-      # поэтому postgres остаётся доступен и в сети n8n_default.
       - n8n_default
-      # n8n_default:
-  # Ollama LLM service for channel topic classification.
+
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -76,6 +68,7 @@ services:
     container_name: youtube_transcribe
     restart: unless-stopped
     working_dir: /app/n8n
+    command: ["/app/n8n/youtube_transcribe"]
     environment:
       - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
       - OBSIDIAN_PATH=/obsidian
@@ -87,25 +80,73 @@ services:
       - TRANSCRIPTION_URL=${TRANSCRIPTION_URL:-https://groq-whisper-proxy.matsgraaf17.workers.dev}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - APP_ENV=${APP_ENV:-production}
-      # Период обновления списка подписок (подсистема channels).
       - CHANNELS_UPDATE_INTERVAL=${CHANNELS_UPDATE_INTERVAL:-1m}
-      # Уведомления о новых подписках в Telegram.
-      # Если токен или чат не заданы, уведомления не отправляются.
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      # OLLAMA settings for LLM-based topic classification.
-      # OLLAMA_URL uses container name "ollama" for internal Docker networking.
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
       - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-15s}
       - OLLAMA_VIDEO_TITLES_LIMIT=${OLLAMA_VIDEO_TITLES_LIMIT:-10}
     volumes:
       - C:/Users/user/Obsidian:/obsidian
-      - C:/Users/user/GO/youTobe_transcribe/cookies.txt:/cookies/cookies.txt
+      - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
     depends_on:
       postgres:
         condition: service_healthy
       ollama:
+        condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  channels:
+    build: .
+    container_name: channels
+    restart: unless-stopped
+    working_dir: /app/n8n
+    command: ["/app/n8n/channels"]
+    environment:
+      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
+      - YT_DLP_PATH=/usr/local/bin/yt-dlp
+      - COOKIES_FILE=/cookies/cookies.txt
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - APP_ENV=${APP_ENV:-production}
+      - CHANNELS_UPDATE_INTERVAL=${CHANNELS_UPDATE_INTERVAL:-1m}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-15s}
+      - OLLAMA_VIDEO_TITLES_LIMIT=${OLLAMA_VIDEO_TITLES_LIMIT:-10}
+    volumes:
+      - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cookies:
+    build: .
+    container_name: cookies
+    restart: unless-stopped
+    working_dir: /app/n8n
+    command: ["/app/n8n/cookies"]
+    environment:
+      - YT_DLP_PATH=/usr/local/bin/yt-dlp
+      - COOKIES_FILE=/cookies/cookies.txt
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
+    depends_on:
+      channels:
         condition: service_started
     logging:
       driver: json-file
@@ -122,6 +163,5 @@ volumes:
     external: false
 
 networks:
-  # Общая сеть с контейнером n8n: n8n подключается к postgres по имени хоста.
   n8n_default:
     external: true
