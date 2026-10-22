@@ -1,0 +1,22 @@
+# Binaries
+youtube_transcribe
+*.exe
+
+# Env
+.env
+cookies.txt
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Large files (>100MB)
+backup/pg_dumpall_*.sql
+n8n_workflow_backup.sql

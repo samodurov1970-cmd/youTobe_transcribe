@@ -1,0 +1,296 @@
+﻿##### wf_0TeslXCJTLKz07RJ.json Q1
+WITH picked AS (
+  SELECT id FROM video_files vf
+  WHERE channel_topic = '╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е'
+    AND status = 'pending'
+    AND COALESCE(file_content, '') <> ''
+    AND file_content NOT IN ('╨Э╨╡╤В ╤А╨╡╤З╨╕ ╨▓ ╨▓╨╕╨┤╨╡╨╛', '╨Т╨╕╨┤╨╡╨╛ ╨▒╨╛╨╗╤М╤И╨╡ 1 ╤З')
+    AND file_content NOT LIKE 'Colab: skipped_too_long%'
+    AND length(file_content) >= 300
+    AND NOT EXISTS (
+      SELECT 1 FROM pending_review pr
+      WHERE pr.video_id = vf.video_id AND pr.status IN ('pending', 'rejected')
+    )
+  ORDER BY id ASC
+  LIMIT 5
+  FOR UPDATE SKIP LOCKED
+),
+upd AS (
+  UPDATE video_files vf
+  SET status = 'processing'
+  WHERE vf.id IN (SELECT id FROM picked)
+  RETURNING vf.id, vf.video_id, vf.channel_name, vf.video_url, vf.file_name, vf.file_content
+)
+SELECT u.id, u.video_id, u.channel_name, u.video_url, u.file_name, u.file_content,
+       v.published_at
+FROM upd u
+LEFT JOIN videos v ON v.video_id = u.video_id
+ORDER BY u.id ASC;
+##### wf_0TeslXCJTLKz07RJ.json Q2
+INSERT INTO video_errors (video_id, video_url, title, channel_name, channel_topic, error_message, status, level, category, source, resolved)
+VALUES ($1, $2, $3, $4, '╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е', $5, 'error', 'ERROR', 'classify', 'n8n', false)
+RETURNING id;
+##### wf_0TeslXCJTLKz07RJ.json Q3
+WITH ins AS (
+  INSERT INTO pending_review (video_id, channel_name, video_url, file_name, file_content, part, chapter, status)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+  ON CONFLICT (video_id) DO NOTHING
+  RETURNING video_id, channel_name, video_url, file_name, part, chapter
+)
+SELECT video_id, channel_name, video_url, file_name, part, chapter, true AS inserted FROM ins
+UNION ALL
+SELECT video_id, channel_name, video_url, file_name, part, chapter, false AS inserted FROM pending_review
+WHERE video_id = $1 AND NOT EXISTS (SELECT 1 FROM ins)
+LIMIT 1;
+##### wf_0TeslXCJTLKz07RJ.json Q4
+UPDATE video_files SET status='review', is_processed=false WHERE video_id=$1;
+##### wf_0TeslXCJTLKz07RJ.json Q5
+WITH input AS (
+  SELECT
+    $1::text AS video_id,
+    $2::text AS video_url,
+    $3::text AS file_name,
+    $4::text AS channel_name,
+    $5::text AS error_message
+),
+ins AS (
+  INSERT INTO video_errors (video_id, video_url, title, channel_name, channel_topic, error_message, status, level, category, source, resolved)
+  SELECT video_id, video_url, file_name, channel_name, '╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е', error_message, 'error', 'ERROR', 'write', 'n8n', false
+  FROM input
+  RETURNING video_id
+)
+UPDATE video_files vf
+SET status = CASE
+    WHEN COALESCE(vf.attempts, 0) + 1 < 3 THEN 'pending'
+    ELSE 'error'
+  END,
+  attempts = COALESCE(vf.attempts, 0) + 1,
+  is_processed = false,
+  last_error = (SELECT error_message FROM input)
+WHERE vf.video_id = (SELECT video_id FROM input)
+RETURNING vf.video_id, vf.status;
+##### wf_0TeslXCJTLKz07RJ.json Q6
+UPDATE video_files
+SET status = CASE
+  WHEN $2 = true THEN 'done'
+  WHEN COALESCE(attempts, 0) + 1 < 3 THEN 'pending'
+  ELSE 'error'
+END,
+attempts = COALESCE(attempts, 0) + CASE WHEN $2 = true THEN 0 ELSE 1 END,
+is_processed = CASE WHEN $2 = true THEN true ELSE false END,
+last_error = CASE WHEN $2 = true THEN NULL ELSE $3 END
+WHERE video_id = $1
+RETURNING video_id, status;
+##### wf_LXuPO870f6WAvdSY.json Q1
+SELECT offset_value FROM tg_offset WHERE id = 1;
+##### wf_LXuPO870f6WAvdSY.json Q2
+SELECT channel_topic FROM video_files WHERE video_id = $1 LIMIT 1;
+##### wf_LXuPO870f6WAvdSY.json Q3
+INSERT INTO tg_updates (update_id, payload, topic, processed)\r
+SELECT {{ $json.update_id }}::bigint,\r
+       '{{ JSON.stringify($json.payload ?? {}).replace(/'/g, "''") }}'::jsonb,\r
+       '{{ $json.topic }}', FALSE\r
+WHERE {{ $json.update_id }}::bigint > 0\r
+ON CONFLICT (update_id) DO NOTHING;\r
+\r
+UPDATE tg_offset SET offset_value = GREATEST(offset_value, {{ $json.update_id + 1 }}::bigint), updated_at = NOW()\r
+WHERE id = 1 AND {{ $json.update_id + 1 }}::bigint > 1;
+##### wf_piwlAmVtqMKYm7f7.json Q1
+UPDATE tg_updates SET claimed_at = now() WHERE update_id = (
+  SELECT update_id FROM tg_updates
+  WHERE topic = '╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е'
+    AND processed = false
+    AND payload IS NOT NULL
+    AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
+  ORDER BY update_id ASC
+  LIMIT 1
+  FOR UPDATE SKIP LOCKED
+) RETURNING update_id, payload, topic;
+##### wf_piwlAmVtqMKYm7f7.json Q2
+WITH upd AS (
+  UPDATE pending_review SET status = 'approved' WHERE video_id = $1 AND status = 'pending' RETURNING video_id, channel_name, video_url, file_name, file_content, part, chapter
+)
+SELECT $1::text AS video_id, $2::text AS callback_query_id, $3::bigint AS message_id, $4::bigint AS chat_id, $5::text AS update_id,
+       (SELECT channel_name FROM upd) AS channel_name,
+       (SELECT video_url FROM upd) AS video_url,
+       (SELECT file_name FROM upd) AS file_name,
+       (SELECT file_content FROM upd) AS file_content,
+       (SELECT part FROM upd) AS part,
+       (SELECT chapter FROM upd) AS chapter,
+       (SELECT count(*) FROM upd) AS updated;
+##### wf_piwlAmVtqMKYm7f7.json Q3
+WITH upd AS (
+  UPDATE pending_review SET status = 'rejected' WHERE video_id = $1 AND status = 'pending' RETURNING video_id
+)
+SELECT $1::text AS video_id, $2::text AS callback_query_id, $3::bigint AS message_id, $4::bigint AS chat_id, $5::text AS update_id, (SELECT count(*) FROM upd) AS updated;
+##### wf_piwlAmVtqMKYm7f7.json Q4
+UPDATE video_files SET status = 'rejected', is_processed = true WHERE video_id = $1 RETURNING video_id;
+##### wf_piwlAmVtqMKYm7f7.json Q5
+UPDATE video_files SET status = CASE WHEN $2 = true THEN 'done' ELSE 'error' END, is_processed = true, attempts = COALESCE(attempts, 0) + CASE WHEN $2 = true THEN 0 ELSE 1 END, last_error = CASE WHEN $2 = true THEN NULL ELSE $3 END WHERE video_id = $1 RETURNING video_id, status;
+##### wf_piwlAmVtqMKYm7f7.json Q6
+WITH input AS (
+  SELECT
+    $1::text AS video_id,
+    $2::text AS video_url,
+    $3::text AS file_name,
+    $4::text AS channel_name,
+    $5::text AS error_message
+),
+ins AS (
+  INSERT INTO video_errors (video_id, video_url, title, channel_name, channel_topic, error_message, status, level, category, source, resolved)
+  SELECT video_id, video_url, file_name, channel_name, '╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е', error_message, 'error', 'ERROR', 'write', 'handler', false
+  FROM input
+  RETURNING video_id
+)
+UPDATE video_files vf
+SET status = CASE
+    WHEN COALESCE(vf.attempts, 0) + 1 < 3 THEN 'pending'
+    ELSE 'error'
+  END,
+  attempts = COALESCE(vf.attempts, 0) + 1,
+  is_processed = false,
+  last_error = (SELECT error_message FROM input)
+WHERE vf.video_id = (SELECT video_id FROM input)
+RETURNING vf.video_id, vf.status;
+##### wf_piwlAmVtqMKYm7f7.json Q7
+UPDATE tg_updates SET processed = true WHERE update_id = $1 RETURNING update_id;
+##### wf_piwlAmVtqMKYm7f7.json Q8
+UPDATE tg_updates SET processed = true WHERE update_id = $1 RETURNING update_id;
+##### wf_piwlAmVtqMKYm7f7.json Q9
+UPDATE tg_updates SET processed = true WHERE update_id = $1 RETURNING update_id;
+##### wf_x0NxUqqgTpU0VoCB.json Q1
+SELECT update_id, payload, topic FROM tg_updates WHERE topic = '╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е' AND processed = false AND payload IS NOT NULL ORDER BY update_id ASC LIMIT 1;
+##### wf_x0NxUqqgTpU0VoCB.json Q2
+WITH upd AS (
+  UPDATE pending_review SET status = 'approved' WHERE video_id = $1 AND status = 'pending' RETURNING video_id, channel_name, video_url, file_name, file_content, part, chapter
+)
+SELECT $1::text AS video_id, $2::text AS callback_query_id, $3::bigint AS message_id, $4::bigint AS chat_id, $5::text AS update_id,
+       (SELECT channel_name FROM upd) AS channel_name,
+       (SELECT video_url FROM upd) AS video_url,
+       (SELECT file_name FROM upd) AS file_name,
+       (SELECT file_content FROM upd) AS file_content,
+       (SELECT part FROM upd) AS part,
+       (SELECT chapter FROM upd) AS chapter,
+       (SELECT count(*) FROM upd) AS updated;
+##### wf_x0NxUqqgTpU0VoCB.json Q3
+WITH upd AS (
+  UPDATE pending_review SET status = 'rejected' WHERE video_id = $1 AND status = 'pending' RETURNING video_id
+)
+SELECT $1::text AS video_id, $2::text AS callback_query_id, $3::bigint AS message_id, $4::bigint AS chat_id, $5::text AS update_id, (SELECT count(*) FROM upd) AS updated;
+##### wf_x0NxUqqgTpU0VoCB.json Q4
+UPDATE video_files SET status = 'rejected', is_processed = true WHERE video_id = $1 RETURNING video_id;
+##### wf_x0NxUqqgTpU0VoCB.json Q5
+UPDATE video_files SET status = CASE WHEN $2 = true THEN 'done' ELSE 'error' END, is_processed = true, attempts = COALESCE(attempts, 0) + CASE WHEN $2 = true THEN 0 ELSE 1 END, last_error = CASE WHEN $2 = true THEN NULL ELSE $3 END WHERE video_id = $1 RETURNING video_id, status;
+##### wf_x0NxUqqgTpU0VoCB.json Q6
+WITH input AS (
+  SELECT
+    $1::text AS video_id,
+    $2::text AS video_url,
+    $3::text AS file_name,
+    $4::text AS channel_name,
+    $5::text AS error_message
+),
+ins AS (
+  INSERT INTO video_errors (video_id, video_url, title, channel_name, channel_topic, error_message, status, level, category, source, resolved)
+  SELECT video_id, video_url, file_name, channel_name, '╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е', error_message, 'error', 'ERROR', 'write', 'handler', false
+  FROM input
+  RETURNING video_id
+)
+UPDATE video_files vf
+SET status = CASE
+    WHEN COALESCE(vf.attempts, 0) + 1 < 3 THEN 'pending'
+    ELSE 'error'
+  END,
+  attempts = COALESCE(vf.attempts, 0) + 1,
+  is_processed = false,
+  last_error = (SELECT error_message FROM input)
+WHERE vf.video_id = (SELECT video_id FROM input)
+RETURNING vf.video_id, vf.status;
+##### wf_x0NxUqqgTpU0VoCB.json Q7
+UPDATE tg_updates SET processed = true WHERE update_id = $1 RETURNING update_id;
+##### wf_x0NxUqqgTpU0VoCB.json Q8
+UPDATE tg_updates SET processed = true WHERE update_id = $1 RETURNING update_id;
+##### wf_x0NxUqqgTpU0VoCB.json Q9
+UPDATE tg_updates SET processed = true WHERE update_id = $1 RETURNING update_id;
+##### wf_youtube.json Q1
+SELECT id, channel_id, video_id, channel_name, video_url,
+       title, is_processed, channel_topic
+FROM videos
+WHERE is_processed = false
+  AND channel_topic IN ('╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е', '╨╝╨╛╨╣_╨╝╨╛╤А╤Б╨║╨╛╨╣_╨░╨║╨▓╨░╤А╨╕╤Г╨╝')
+ORDER BY
+  CASE
+    WHEN published_at > NOW() - INTERVAL '7 days'  THEN 0
+    WHEN published_at > NOW() - INTERVAL '30 days' THEN 1
+    WHEN published_at > NOW() - INTERVAL '90 days' THEN 2
+    ELSE 3
+  END,
+  CASE
+    WHEN channel_topic = '╨╛╨▒╤Г╤З╨╡╨╜╨╕╨╡_╤В╨╛╤А╨│╨╛╨▓╨╗╨╡_╨╜╨░_╤А╤Л╨╜╨║╨░╤Е' THEN 0
+    ELSE 1
+  END,
+  published_at DESC NULLS LAST
+LIMIT 5;
+##### wf_youtube.json Q2
+WITH params AS (SELECT $1::jsonb AS p),
+flags AS (
+  SELECT
+    COALESCE((SELECT (p->>'is_rate_limited')::boolean FROM params), false) AS rate_limited,
+    COALESCE((SELECT (p->>'is_auth_error')::boolean FROM params), false) AS auth_error
+),
+stop_flag AS (
+  SELECT (rate_limited OR auth_error) AS flag FROM flags
+),
+mark AS (
+  UPDATE videos SET is_processed = true, processed_at = NOW()
+  WHERE video_id = (SELECT p->>'video_id' FROM params)
+    AND (SELECT (p->>'mark_processed')::boolean FROM params) = true
+    AND (SELECT flag FROM stop_flag) = false
+  RETURNING video_id
+),
+ins_file AS (
+  INSERT INTO video_files (
+    file_name, video_id, video_url, file_content,
+    channel_name, channel_topic, status, is_processed, last_error
+  )
+  SELECT
+    (SELECT p->>'file_name' FROM params),
+    (SELECT p->>'video_id' FROM params),
+    (SELECT p->>'video_url' FROM params),
+    CASE
+      WHEN (SELECT flag FROM stop_flag) THEN COALESCE((SELECT p->>'content' FROM params), '')
+      WHEN (SELECT (p->>'is_error')::boolean FROM params) THEN ''
+      ELSE (SELECT p->>'content' FROM params)
+    END,
+    (SELECT p->>'channel_name' FROM params),
+    (SELECT p->>'channel_topic' FROM params),
+    CASE
+      WHEN (SELECT rate_limited FROM flags) THEN 'rate_limited'
+      WHEN (SELECT auth_error FROM flags) THEN 'auth_error'
+      WHEN (SELECT p->>'status' FROM params) = 'too_long' THEN 'too_long'
+      WHEN (SELECT (p->>'is_error')::boolean FROM params) THEN 'error'
+      ELSE 'pending'
+    END,
+    CASE
+      WHEN (SELECT flag FROM stop_flag) THEN false
+      ELSE (SELECT (p->>'is_error')::boolean FROM params)
+    END,
+    CASE
+      WHEN (SELECT flag FROM stop_flag) THEN NULL
+      WHEN (SELECT (p->>'is_error')::boolean FROM params) THEN (SELECT p->>'error_message' FROM params)
+      ELSE NULL
+    END
+  WHERE (SELECT (p->>'mark_processed')::boolean FROM params) = true
+    AND (SELECT flag FROM stop_flag) = false
+  ON CONFLICT (video_id) DO UPDATE SET
+    file_name = EXCLUDED.file_name,
+    video_url = EXCLUDED.video_url,
+    channel_name = EXCLUDED.channel_name,
+    channel_topic = EXCLUDED.channel_topic,
+    status = EXCLUDED.status,
+    is_processed = EXCLUDED.is_processed,
+    last_error = EXCLUDED.last_error,
+    file_content = EXCLUDED.file_content
+  RETURNING video_id
+)
+SELECT * FROM mark UNION ALL SELECT * FROM ins_file;
