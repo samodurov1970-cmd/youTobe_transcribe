@@ -129,9 +129,6 @@ func (s *Service) processOnce(ctx context.Context) {
 	}
 
 	s.log.Info("channels.fetched", "count", len(subs))
-	if len(subs) == 0 {
-		return
-	}
 
 	if err := s.saveSubscriptions(ctx, subs, known); err != nil {
 		s.log.Error("channels.save_failed", "error", err.Error())
@@ -145,10 +142,15 @@ func (s *Service) processOnce(ctx context.Context) {
 	_, gone, err := s.markUnsubscribed(ctx, subs)
 	if err != nil {
 		s.log.Error("channels.unsubscribe_failed", "error", err.Error())
-		return
+		// gone == nil при любой ошибке markUnsubscribed (до commit — return 0, nil, err),
+		// поэтому уведомления не отправятся. Это ожидаемо: транзакция откатится,
+		// is_subscribed = false не сохранится.
 	}
 	if len(gone) > 0 {
+		s.log.Info("channels.unsub_notify_start", "count", len(gone), "ids", gone)
 		s.notifier.notifyUnsubscriptions(ctx, gone)
+	} else {
+		s.log.Info("channels.unsub_notify_skipped", "reason", "empty_gone")
 	}
 }
 
@@ -263,7 +265,6 @@ func (s *Service) fetchSubscriptions(ctx context.Context) ([]subscription, error
 		"--flat-playlist",
 		"--no-warnings",
 		"--dump-single-json",
-		"--no-playlist-random",
 		subscriptionsURL,
 	}
 
@@ -359,7 +360,6 @@ func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channe
 		"--no-warnings",
 		fmt.Sprintf("--playlist-end=%d", limit),
 		"--dump-single-json",
-		"--no-playlist-random",
 	}
 
 	if s.cfg.CookiesFile != "" {
@@ -457,6 +457,11 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 	}
 	resubCount, _ := resub.RowsAffected()
 
+	s.log.Info("channels.mark_unsubscribed",
+		"ids_count", len(ids),
+		"active_count", activeCount,
+	)
+
 	// Каналы, которые больше нет в списке подписок.
 	rows, err := tx.QueryContext(ctx, `
 		UPDATE channels SET is_subscribed = false, unsubscribed_at = NOW()
@@ -514,8 +519,13 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 		return 0, nil, fmt.Errorf("commit tx: %w", err)
 	}
 
+	s.log.Info("channels.mark_unsubscribed_done",
+		"gone", len(gone),
+		"resub", resubCount,
+	)
+
 	if len(gone) > 0 {
-		s.log.Info("channels.unsubscribed", "count", len(gone))
+		s.log.Info("channels.unsubscribed", "count", len(gone), "ids", gone)
 	}
 	if resubCount > 0 {
 		s.log.Info("channels.resubscribed", "count", resubCount)
