@@ -1,1 +1,0 @@
-{"model":"qwen2.5:1.5b","stream":false,"options":{"temperature":0,"num_predict":4},"prompt":"Answer with only 1. Topics: 1 news 2 aquarium 3 trading. Channel: Marine Reef Aquascape, coral care."}
