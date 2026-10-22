@@ -97,7 +97,7 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.log.Info("channels.stopped")
+			s.log.Info("channels.stopped", "описание", "Работа подсистемы подписок остановлена")
 			return
 		case <-ticker.C:
 			s.processOnce(ctx)
@@ -112,26 +112,32 @@ func (s *Service) Run(ctx context.Context) {
 //   - сохраняет подписки в базу;
 //   - отправляет уведомления о новых подписках и отписках в Telegram.
 func (s *Service) processOnce(ctx context.Context) {
-	s.log.Info("channels.update_started")
+	s.log.Info("channels.update_started", "описание", "Начато обновление списка подписок")
 
 	// Снимок известных каналов до изменений — нужен для определения новых подписок.
 	known, err := s.notifier.knownChannelIDs(ctx)
 	if err != nil {
-		s.log.Error("channels.known_channels_failed", "error", err.Error())
+		s.log.Error("channels.known_channels_failed", 
+			"error", err.Error(),
+			"описание", "ОШИБКА: Не удалось получить список известных каналов из БД (продолжаем работу)")
 		// Продолжаем — это не критичная ошибка, просто не отправим уведомления о новых.
 		known = map[string]bool{}
 	}
 
 	subs, err := s.fetchSubscriptions(ctx)
 	if err != nil {
-		s.log.Error("channels.fetch_failed", "error", err.Error())
+		s.log.Error("channels.fetch_failed", 
+			"error", err.Error(),
+			"описание", "ОШИБКА: Не удалось получить список подписок через yt-dlp")
 		return
 	}
 
-	s.log.Info("channels.fetched", "count", len(subs))
+	s.log.Info("channels.fetched", "count", len(subs), "описание", "Список подписок успешно получен")
 
 	if err := s.saveSubscriptions(ctx, subs, known); err != nil {
-		s.log.Error("channels.save_failed", "error", err.Error())
+		s.log.Error("channels.save_failed", 
+			"error", err.Error(),
+			"описание", "ОШИБКА: Не удалось сохранить новые подписки в базу данных")
 		return
 	}
 
@@ -141,16 +147,23 @@ func (s *Service) processOnce(ctx context.Context) {
 	// Уведомления об отписках в Telegram.
 	_, gone, err := s.markUnsubscribed(ctx, subs)
 	if err != nil {
-		s.log.Error("channels.unsubscribe_failed", "error", err.Error())
+		s.log.Error("channels.unsubscribe_failed", 
+			"error", err.Error(),
+			"описание", "ОШИБКА: Сбой при проверке отписок (транзакция откачена)")
 		// gone == nil при любой ошибке markUnsubscribed (до commit — return 0, nil, err),
 		// поэтому уведомления не отправятся. Это ожидаемо: транзакция откатится,
 		// is_subscribed = false не сохранится.
 	}
 	if len(gone) > 0 {
-		s.log.Info("channels.unsub_notify_start", "count", len(gone), "ids", gone)
+		s.log.Info("channels.unsub_notify_start", 
+			"count", len(gone), 
+			"ids", gone,
+			"описание", "Найдены отписки, начинаем отправку уведомлений")
 		s.notifier.notifyUnsubscriptions(ctx, gone)
 	} else {
-		s.log.Info("channels.unsub_notify_skipped", "reason", "empty_gone")
+		s.log.Info("channels.unsub_notify_skipped", 
+			"reason", "empty_gone",
+			"описание", "Новых отписок не обнаружено, уведомления не отправляются")
 	}
 }
 
@@ -374,6 +387,7 @@ func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channe
 		s.log.Error("channels.fetch_video_titles_failed",
 			"channel_id", channelID,
 			"error", err.Error(),
+			"описание", "ОШИБКА: Не удалось получить названия видео канала для классификации",
 		)
 		return nil
 	}
@@ -388,6 +402,7 @@ func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channe
 		s.log.Error("channels.parse_video_titles_failed",
 			"channel_id", channelID,
 			"error", err.Error(),
+			"описание", "ОШИБКА: Не удалось разобрать JSON с названиями видео",
 		)
 		return nil
 	}
@@ -402,6 +417,7 @@ func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channe
 	s.log.Info("channels.video_titles_fetched",
 		"channel_id", channelID,
 		"count", len(titles),
+		"описание", "Названия видео для классификации успешно получены",
 	)
 
 	return titles
@@ -415,7 +431,9 @@ func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channe
 // пустой или обрезанный ответ yt-dlp не удалил все каналы).
 func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (int, []string, error) {
 	if len(subs) == 0 {
-		s.log.Warn("channels.unsubscribe_skipped", "reason", "empty_subscription_list")
+		s.log.Warn("channels.unsubscribe_skipped", 
+			"reason", "empty_subscription_list",
+			"описание", "Проверка отписок пропущена: список подписок пуст")
 		return 0, nil, nil
 	}
 
@@ -437,6 +455,7 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 			"reason", "subscription_list_too_short",
 			"active_channels", activeCount,
 			"received", len(subs),
+			"описание", "Проверка отписок пропущена: получено слишком мало каналов (сработала защита)",
 		)
 		return 0, nil, nil
 	}
@@ -460,6 +479,7 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 	s.log.Info("channels.mark_unsubscribed",
 		"ids_count", len(ids),
 		"active_count", activeCount,
+		"описание", "Начата проверка отписок в базе данных",
 	)
 
 	// Каналы, которые больше нет в списке подписок.
@@ -522,13 +542,21 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 	s.log.Info("channels.mark_unsubscribed_done",
 		"gone", len(gone),
 		"resub", resubCount,
+		"описание", "Проверка отписок успешно завершена",
 	)
 
 	if len(gone) > 0 {
-		s.log.Info("channels.unsubscribed", "count", len(gone), "ids", gone)
+		s.log.Info("channels.unsubscribed", 
+			"count", len(gone), 
+			"ids", gone,
+			"описание", "Каналы успешно помечены как отписанные",
+		)
 	}
 	if resubCount > 0 {
-		s.log.Info("channels.resubscribed", "count", resubCount)
+		s.log.Info("channels.resubscribed", 
+			"count", resubCount,
+			"описание", "Обнаружены повторные подписки на каналы",
+		)
 	}
 
 	return len(gone), gone, nil

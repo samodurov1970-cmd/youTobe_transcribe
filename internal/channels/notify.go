@@ -147,7 +147,9 @@ func (n *subscribeNotifier) notifyNewSubscriptions(ctx context.Context, known ma
 
 // notifyUnsubscriptions отправляет уведомления об отписке от каналов.
 func (n *subscribeNotifier) notifyUnsubscriptions(ctx context.Context, gone []string) {
+	n.log.Info("channels.notify_unsub_enter", "count", len(gone), "ctx_err", ctx.Err())
 	if n.disabled || !n.tg.enabled() {
+		n.log.Warn("channels.notify_unsub_skipped", "reason", "disabled_or_not_configured")
 		return
 	}
 
