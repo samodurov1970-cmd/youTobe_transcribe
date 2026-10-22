@@ -22,22 +22,22 @@ func main() {
 	if cookiesFile == "" {
 		cookiesFile = "/cookies/cookies.txt"
 	}
+	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	telegramChatID := os.Getenv("TELEGRAM_CHAT_ID")
 
-	checker := cookies.NewChecker(ytDlpPath, cookiesFile, log)
+	checker := cookies.NewChecker(ytDlpPath, cookiesFile, telegramToken, telegramChatID, log)
 
 	log.Info("cookies.started", "interval", "1h")
 
 	ctx := context.Background()
-	if err := checker.Check(ctx); err != nil {
-		log.Error("cookies.failed", "error", err.Error())
-	}
+	err := checker.Check(ctx)
+	checker.SendReport(ctx, err)
 
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if err := checker.Check(ctx); err != nil {
-			log.Error("cookies.failed", "error", err.Error())
-		}
+		err := checker.Check(ctx)
+		checker.SendReport(ctx, err)
 	}
 }
