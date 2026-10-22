@@ -105,25 +105,20 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-// processOnce один раз выполняет полный цикл обновления подписок:
-//   - снимает список каналов из базы (для определения новых подписок);
-//   - получает список подписок YouTube через yt-dlp;
-//   - классифицирует новые каналы с помощью LLM и ключевых слов;
-//   - сохраняет подписки в базу;
-//   - отправляет уведомления о новых подписках и отписках в Telegram.
+// processOnce один раз выполняет полный цикл обновления подписок.
 func (s *Service) processOnce(ctx context.Context) {
 	s.log.Info("channels.update_started", "описание", "Начато обновление списка подписок")
 
-	// Снимок известных каналов до изменений — нужен для определения новых подписок.
+	// 1. Снимок известных каналов до изменений
 	known, err := s.notifier.knownChannelIDs(ctx)
 	if err != nil {
 		s.log.Error("channels.known_channels_failed", 
 			"error", err.Error(),
 			"описание", "ОШИБКА: Не удалось получить список известных каналов из БД (продолжаем работу)")
-		// Продолжаем — это не критичная ошибка, просто не отправим уведомления о новых.
 		known = map[string]bool{}
 	}
 
+	// 2. Получаем список подписок из YouTube
 	subs, err := s.fetchSubscriptions(ctx)
 	if err != nil {
 		s.log.Error("channels.fetch_failed", 
@@ -131,28 +126,14 @@ func (s *Service) processOnce(ctx context.Context) {
 			"описание", "ОШИБКА: Не удалось получить список подписок через yt-dlp")
 		return
 	}
-
 	s.log.Info("channels.fetched", "count", len(subs), "описание", "Список подписок успешно получен")
 
-	if err := s.saveSubscriptions(ctx, subs, known); err != nil {
-		s.log.Error("channels.save_failed", 
-			"error", err.Error(),
-			"описание", "ОШИБКА: Не удалось сохранить новые подписки в базу данных")
-		return
-	}
-
-	// Уведомления о новых подписках в Telegram.
-	s.notifier.notifyNewSubscriptions(ctx, known, subs)
-
-	// Уведомления об отписках в Telegram.
+	// 3. СНАЧАЛА проверяем отписки и удаляем данные
 	_, gone, err := s.markUnsubscribed(ctx, subs)
 	if err != nil {
 		s.log.Error("channels.unsubscribe_failed", 
 			"error", err.Error(),
 			"описание", "ОШИБКА: Сбой при проверке отписок (транзакция откачена)")
-		// gone == nil при любой ошибке markUnsubscribed (до commit — return 0, nil, err),
-		// поэтому уведомления не отправятся. Это ожидаемо: транзакция откатится,
-		// is_subscribed = false не сохранится.
 	}
 	if len(gone) > 0 {
 		s.log.Info("channels.unsub_notify_start", 
@@ -165,11 +146,20 @@ func (s *Service) processOnce(ctx context.Context) {
 			"reason", "empty_gone",
 			"описание", "Новых отписок не обнаружено, уведомления не отправляются")
 	}
+
+	// 4. ПОТОМ сохраняем новые подписки (восстанавливаем статус)
+	if err := s.saveSubscriptions(ctx, subs, known); err != nil {
+		s.log.Error("channels.save_failed", 
+			"error", err.Error(),
+			"описание", "ОШИБКА: Не удалось сохранить новые подписки в базу данных")
+		return
+	}
+
+	// 5. Уведомления о новых подписках
+	s.notifier.notifyNewSubscriptions(ctx, known, subs)
 }
 
 // saveSubscriptions сохраняет список подписок в базу данных.
-// Классификация тем (тема канала) выполняется для новых каналов и
-// каналов без темы.
 func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, known map[string]bool) error {
 	tx, err := s.cfg.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -178,7 +168,6 @@ func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, kn
 	defer tx.Rollback()
 
 	for _, sub := range subs {
-		// Если канал уже подписан, пропускаем (не перезаписываем тему).
 		exists, subscribed, err := channelExistsAndSubscribed(ctx, tx, sub.ChannelID)
 		if err != nil {
 			return fmt.Errorf("check channel %s: %w", sub.ChannelID, err)
@@ -187,10 +176,8 @@ func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, kn
 			continue
 		}
 
-		// Нужна классификация темы.
 		topic := ""
 		if exists && !subscribed {
-			// Повторная подписка: используем ранее определённую тему, если есть.
 			topic, err = getChannelTopic(ctx, tx, sub.ChannelID)
 			if err != nil {
 				return fmt.Errorf("get topic for %s: %w", sub.ChannelID, err)
@@ -199,7 +186,6 @@ func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, kn
 				topic, _ = classifyChannelWithLLM(s.llm, sub.ChannelID, sub.Title, sub.Description, nil)
 			}
 		} else {
-			// Новый канал: получаем темы видео для LLM, если доступен Ollama.
 			var titles []string
 			if s.llm != nil {
 				titles = s.fetchChannelVideoTitles(ctx, sub.ChannelID, sub.URL)
@@ -215,7 +201,6 @@ func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, kn
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit save tx: %w", err)
 	}
-
 	return nil
 }
 
@@ -228,7 +213,6 @@ type subscription struct {
 }
 
 // channelsLLMClient создаёт клиент Ollama из конфигурации.
-// Возвращает nil, если URL не задан (LLM отключён).
 func channelsLLMClient(cfg *Config) *LLMClient {
 	if cfg.OLLAMAURL == "" {
 		return nil
@@ -348,21 +332,17 @@ func validChannelID(id string) bool {
 }
 
 // fetchChannelVideoTitles получает названия последних N видео канала через yt-dlp.
-// Используется для LLM-классификации темы канала.
-// Возвращает пустой срез при любой ошибке — LLM просто получит только имя и описание.
 func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channelURL string) []string {
 	limit := s.cfg.OLLAMAVideoTitlesLimit
 	if limit <= 0 {
 		limit = 10
 	}
 
-	// Используем URL канала или формируем его из ID.
 	playlistURL := channelURL
 	if playlistURL == "" {
 		playlistURL = "https://www.youtube.com/channel/" + channelID
 	}
 
-	// Добавляем параметры для получения только заголовков и ограничения количества.
 	parsedURL, err := url.Parse(playlistURL)
 	if err == nil {
 		playlistURL = parsedURL.String()
@@ -392,7 +372,6 @@ func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channe
 		return nil
 	}
 
-	// Парсим JSON-ответ yt-dlp для извлечения заголовков видео.
 	var payload struct {
 		Entries []struct {
 			Title string `json:"title"`
@@ -423,12 +402,12 @@ func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channe
 	return titles
 }
 
+// ============================================================================
+// РЕФАКТОРИНГ: markUnsubscribed разбита на подфункции
+// ============================================================================
+
 // markUnsubscribed помечает каналы, которые больше нет в списке подписок,
 // как отписанные. Возвращает список ID отписавшихся каналов для уведомлений.
-//
-// Защита от массовой отметки: если число активных каналов в базе заметно
-// больше числа полученных подписок, отписки не обрабатываются (чтобы
-// пустой или обрезанный ответ yt-dlp не удалил все каналы).
 func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (int, []string, error) {
 	if len(subs) == 0 {
 		s.log.Warn("channels.unsubscribe_skipped", 
@@ -442,12 +421,9 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 		ids = append(ids, sub.ChannelID)
 	}
 
-	// Считаем активные каналы в базе, чтобы применить защиту.
-	var activeCount int
-	if err := s.cfg.DB.QueryRowContext(ctx,
-		`SELECT count(*) FROM channels WHERE coalesce(is_subscribed, true) = true`,
-	).Scan(&activeCount); err != nil {
-		return 0, nil, fmt.Errorf("count active channels: %w", err)
+	activeCount, err := s.countActiveChannels(ctx)
+	if err != nil {
+		return 0, nil, err
 	}
 
 	if activeCount > 2*len(subs) {
@@ -460,21 +436,33 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 		return 0, nil, nil
 	}
 
+	return s.applyUnsubscriptions(ctx, ids, activeCount)
+}
+
+// countActiveChannels считает количество активных подписок в базе.
+func (s *Service) countActiveChannels(ctx context.Context) (int, error) {
+	var activeCount int
+	err := s.cfg.DB.QueryRowContext(ctx,
+		`SELECT count(*) FROM channels WHERE coalesce(is_subscribed, true) = true`,
+	).Scan(&activeCount)
+	if err != nil {
+		return 0, fmt.Errorf("count active channels: %w", err)
+	}
+	return activeCount, nil
+}
+
+// applyUnsubscriptions выполняет транзакцию по обновлению статусов подписок.
+func (s *Service) applyUnsubscriptions(ctx context.Context, ids []string, activeCount int) (int, []string, error) {
 	tx, err := s.cfg.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Каналы, которые снова в списке подписок.
-	resub, err := tx.ExecContext(ctx, `
-		UPDATE channels SET is_subscribed = true, unsubscribed_at = NULL, last_seen_at = NOW()
-		WHERE channel_id = ANY($1) AND coalesce(is_subscribed, true) = false
-	`, pq.Array(ids))
+	resubCount, err := resubscribeChannels(ctx, tx, ids)
 	if err != nil {
-		return 0, nil, fmt.Errorf("resubscribe: %w", err)
+		return 0, nil, err
 	}
-	resubCount, _ := resub.RowsAffected()
 
 	s.log.Info("channels.mark_unsubscribed",
 		"ids_count", len(ids),
@@ -482,57 +470,17 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 		"описание", "Начата проверка отписок в базе данных",
 	)
 
-	// Каналы, которые больше нет в списке подписок.
-	rows, err := tx.QueryContext(ctx, `
-		UPDATE channels SET is_subscribed = false, unsubscribed_at = NOW()
-		WHERE coalesce(is_subscribed, true) = true
-		  AND NOT (channel_id = ANY($1))
-		RETURNING channel_id
-	`, pq.Array(ids))
+	gone, err := markGoneChannels(ctx, tx, ids)
 	if err != nil {
-		return 0, nil, fmt.Errorf("mark unsubscribed: %w", err)
-	}
-	var gone []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return 0, nil, fmt.Errorf("scan unsubscribed: %w", err)
-		}
-		gone = append(gone, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, nil, fmt.Errorf("rows err: %w", err)
+		return 0, nil, err
 	}
 
-	// Удаляем видео отписавшихся каналов и пишем журнал событий.
-	if len(gone) > 0 {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM videos WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
-			return 0, nil, fmt.Errorf("delete videos: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM videos_new WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
-			return 0, nil, fmt.Errorf("delete videos_new: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO channels_unsubscribed (channel_id, channel_name, topic, videos_deleted, videos_new_deleted, event)
-			SELECT channel_id, channel_name, topic, 0, 0, 'unsub'
-			FROM channels WHERE channel_id = ANY($1)
-			`, pq.Array(gone)); err != nil {
-			return 0, nil, fmt.Errorf("log unsubscribe: %w", err)
-		}
+	if err := purgeUnsubscribedChannels(ctx, tx, gone); err != nil {
+		return 0, nil, err
 	}
 
-	if resubCount > 0 {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO channels_unsubscribed (channel_id, channel_name, topic, videos_deleted, videos_new_deleted, event)
-			SELECT channel_id, channel_name, topic, 0, 0, 'resub'
-			FROM channels WHERE channel_id = ANY($1) AND coalesce(is_subscribed, true) = true
-			`, pq.Array(ids)); err != nil {
-			return 0, nil, fmt.Errorf("log resubscribe: %w", err)
-		}
+	if err := logResubscriptions(ctx, tx, ids, resubCount); err != nil {
+		return 0, nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -560,4 +508,93 @@ func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (in
 	}
 
 	return len(gone), gone, nil
+}
+
+// resubscribeChannels возвращает каналы, которые снова появились в списке подписок.
+func resubscribeChannels(ctx context.Context, tx *sql.Tx, ids []string) (int64, error) {
+	resub, err := tx.ExecContext(ctx, `
+		UPDATE channels SET is_subscribed = true, unsubscribed_at = NULL, last_seen_at = NOW()
+		WHERE channel_id = ANY($1) AND coalesce(is_subscribed, true) = false
+	`, pq.Array(ids))
+	if err != nil {
+		return 0, fmt.Errorf("resubscribe: %w", err)
+	}
+	return resub.RowsAffected()
+}
+
+// markGoneChannels помечает каналы как отписанные и возвращает их ID.
+func markGoneChannels(ctx context.Context, tx *sql.Tx, ids []string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+		UPDATE channels SET is_subscribed = false, unsubscribed_at = NOW()
+		WHERE coalesce(is_subscribed, true) = true
+		  AND NOT (channel_id = ANY($1))
+		RETURNING channel_id
+	`, pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("mark unsubscribed: %w", err)
+	}
+	defer rows.Close()
+
+	var gone []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan unsubscribed: %w", err)
+		}
+		gone = append(gone, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows err: %w", err)
+	}
+	return gone, nil
+}
+
+// purgeUnsubscribedChannels удаляет видео отписавшихся каналов и пишет журнал событий.
+func purgeUnsubscribedChannels(ctx context.Context, tx *sql.Tx, gone []string) error {
+	if len(gone) == 0 {
+		return nil
+	}
+
+	// 1. Удаляем основные видео
+	if _, err := tx.ExecContext(ctx, `DELETE FROM videos WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
+		return fmt.Errorf("delete videos: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM videos_new WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
+		return fmt.Errorf("delete videos_new: %w", err)
+	}
+
+	// 2. Удаляем файлы в video_files по имени канала (с учетом пробелов)
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM video_files 
+		WHERE TRIM(channel_name) IN (
+			SELECT TRIM(channel_name) FROM channels WHERE channel_id = ANY($1)
+		)
+	`, pq.Array(gone)); err != nil {
+		return fmt.Errorf("delete video_files: %w", err)
+	}
+
+	// 3. Записываем журнал событий
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO channels_unsubscribed (channel_id, channel_name, topic, videos_deleted, videos_new_deleted, event)
+		SELECT channel_id, channel_name, topic, 0, 0, 'unsub'
+		FROM channels WHERE channel_id = ANY($1)
+		`, pq.Array(gone)); err != nil {
+		return fmt.Errorf("log unsubscribe: %w", err)
+	}
+	return nil
+}
+
+// logResubscriptions записывает в журнал события о повторных подписках.
+func logResubscriptions(ctx context.Context, tx *sql.Tx, ids []string, resubCount int64) error {
+	if resubCount == 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO channels_unsubscribed (channel_id, channel_name, topic, videos_deleted, videos_new_deleted, event)
+		SELECT channel_id, channel_name, topic, 0, 0, 'resub'
+		FROM channels WHERE channel_id = ANY($1) AND coalesce(is_subscribed, true) = true
+		`, pq.Array(ids)); err != nil {
+		return fmt.Errorf("log resubscribe: %w", err)
+	}
+	return nil
 }
