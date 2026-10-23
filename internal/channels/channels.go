@@ -555,12 +555,14 @@ func purgeUnsubscribedChannels(ctx context.Context, tx *sql.Tx, gone []string) e
 		return nil
 	}
 
-	// 1. Удаляем основные видео
-	if _, err := tx.ExecContext(ctx, `DELETE FROM videos WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
-		return fmt.Errorf("delete videos: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM videos_new WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
-		return fmt.Errorf("delete videos_new: %w", err)
+	// 1. Удаляем записи из trash (по video_id, которые относятся к отписанным каналам)
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM trash 
+		WHERE video_id IN (
+			SELECT video_id FROM videos WHERE channel_id = ANY($1)
+		)
+	`, pq.Array(gone)); err != nil {
+		return fmt.Errorf("delete trash: %w", err)
 	}
 
 	// 2. Удаляем файлы в video_files по имени канала (с учетом пробелов)
@@ -573,7 +575,15 @@ func purgeUnsubscribedChannels(ctx context.Context, tx *sql.Tx, gone []string) e
 		return fmt.Errorf("delete video_files: %w", err)
 	}
 
-	// 3. Записываем журнал событий
+	// 3. Удаляем основные видео
+	if _, err := tx.ExecContext(ctx, `DELETE FROM videos WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
+		return fmt.Errorf("delete videos: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM videos_new WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
+		return fmt.Errorf("delete videos_new: %w", err)
+	}
+
+	// 4. Записываем журнал событий
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO channels_unsubscribed (channel_id, channel_name, topic, videos_deleted, videos_new_deleted, event)
 		SELECT channel_id, channel_name, topic, 0, 0, 'unsub'

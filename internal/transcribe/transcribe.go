@@ -1,12 +1,14 @@
-// Package transcribe отправляет аудио на Groq Whisper для получения текста.
 package transcribe
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
-	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,67 +17,92 @@ import (
 
 // File отправляет аудиофайл на Groq Whisper и возвращает транскрипт.
 func File(transcriptionURL, audioPath string) (string, error) {
+	log := logger.Log.With("component", "transcribe")
+
 	start := time.Now()
-	logger.Log.Info("transcribe.start",
+	log.Info("transcribe.start",
 		"audio_path", audioPath,
 		"model", "whisper-large-v3",
-		"language", "ru",
 		"transcription_url", transcriptionURL,
 	)
-	formData := url.Values{}
-	formData.Set("file", "@"+audioPath)
-	formData.Set("model", "whisper-large-v3")
-	formData.Set("language", "ru")
 
-	req, err := http.NewRequest("POST", transcriptionURL, strings.NewReader(formData.Encode()))
+	// Открываем файл
+	file, err := os.Open(audioPath)
 	if err != nil {
-		logger.Log.Error("transcribe.request_create_failed", logger.Err(err))
+		log.Error("transcribe.open_failed", "error", err.Error())
+		return "", fmt.Errorf("open audio file: %w", err)
+	}
+	defer file.Close()
+
+	// Создаем multipart/form-data
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Добавляем файл
+	part, err := writer.CreateFormFile("file", filepath.Base(audioPath))
+	if err != nil {
+		log.Error("transcribe.create_form_failed", "error", err.Error())
+		return "", fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		log.Error("transcribe.copy_failed", "error", err.Error())
+		return "", fmt.Errorf("copy file to form: %w", err)
+	}
+
+	// Добавляем поля (без language, чтобы Whisper сам определил язык)
+	_ = writer.WriteField("model", "whisper-large-v3")
+	writer.Close()
+
+	// Создаем запрос
+	req, err := http.NewRequest("POST", transcriptionURL, body)
+	if err != nil {
+		log.Error("transcribe.request_create_failed", "error", err.Error())
 		return "", fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.Log.Error("transcribe.request_failed", logger.Err(err), "transcription_url", transcriptionURL)
+		log.Error("transcribe.request_failed", "error", err.Error(), "transcription_url", transcriptionURL)
 		return "", fmt.Errorf("transcribe request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	logger.Log.Info("transcribe.response_received",
+	log.Info("transcribe.response_received",
 		"http_status", resp.StatusCode,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
-	body, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.Log.Error("transcribe.read_body_failed", logger.Err(err))
+		log.Error("transcribe.read_body_failed", "error", err.Error())
 		return "", fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Log.Error("transcribe.http_error",
+		log.Error("transcribe.http_error",
 			"http_status", resp.StatusCode,
-			"body_len", len(body),
-			"body_preview", string(body[:min(500, len(body))]),
+			"body_len", len(bodyBytes),
+			"body_preview", string(bodyBytes[:min(500, len(bodyBytes))]),
 		)
-		return "", fmt.Errorf("transcription HTTP %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("transcription HTTP %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		logger.Log.Error("transcribe.parse_failed", logger.Err(err), "body_preview", string(body[:min(500, len(body))]))
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		log.Error("transcribe.parse_failed", "error", err.Error(), "body_preview", string(bodyBytes[:min(500, len(bodyBytes))]))
 		return "", fmt.Errorf("parse response: %w", err)
 	}
 
 	if text, ok := result["text"].(string); ok {
-		logger.Log.Info("transcribe.ok",
+		log.Info("transcribe.ok",
 			"duration_ms", time.Since(start).Milliseconds(),
 			"text_len", len(text),
 		)
 		return strings.TrimSpace(text), nil
 	}
 
-	logger.Log.Error("transcribe.no_text_field", "body_preview", string(body[:min(500, len(body))]))
-	return "", fmt.Errorf("no 'text' field in response: %s", string(body))
+	log.Error("transcribe.no_text_field", "body_preview", string(bodyBytes[:min(500, len(bodyBytes))]))
+	return "", fmt.Errorf("no 'text' field in response: %s", string(bodyBytes))
 }

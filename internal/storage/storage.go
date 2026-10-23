@@ -16,8 +16,6 @@ import (
 var DB *sql.DB
 
 // log возвращает логгер подсистемы хранения (component = storage).
-// Функция, а не переменная: logger.Log инициализируется в main() при старте,
-// поэтому на этапе инициализации пакета он ещё равен nil.
 func log() *slog.Logger {
 	return logger.Log.With("component", "storage")
 }
@@ -33,6 +31,7 @@ type VideoFile struct {
 	Status       string
 	IsProcessed  bool
 	ChannelTopic string
+	LastError    string // <-- ДОБАВЛЕНО
 }
 
 // Init открывает подключение к PostgreSQL и проверяет его.

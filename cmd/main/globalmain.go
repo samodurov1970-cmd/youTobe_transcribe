@@ -12,6 +12,8 @@ import (
 	"youTobe_transcribe/internal/cookies"
 	"youTobe_transcribe/internal/logger"
 	"youTobe_transcribe/internal/storage"
+	"youTobe_transcribe/internal/trash_manager"
+	"youTobe_transcribe/internal/validator"
 	"youTobe_transcribe/internal/videos"
 )
 
@@ -104,7 +106,37 @@ func main() {
 		}
 	}()
 
-	log.Info("app.started", "services", "channels, cookies (9:00, 21:00), videos (3h), daily_stats (00:00)")
+	// 5. Запуск валидатора (раз в 5 минут)
+	validatorSvc := validator.NewValidator(log)
+	go func() {
+		if err := validatorSvc.Run(ctx); err != nil {
+			log.Error("validator.failed", "error", err.Error())
+		}
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := validatorSvc.Run(ctx); err != nil {
+				log.Error("validator.failed", "error", err.Error())
+			}
+		}
+	}()
+
+	// 6. Запуск trash_manager (раз в 5 минут)
+	trashSvc := trash_manager.NewManager(log)
+	go func() {
+		if err := trashSvc.Run(ctx); err != nil {
+			log.Error("trash_manager.failed", "error", err.Error())
+		}
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := trashSvc.Run(ctx); err != nil {
+				log.Error("trash_manager.failed", "error", err.Error())
+			}
+		}
+	}()
+
+	log.Info("app.started", "services", "channels, cookies, videos, stats, validator, trash_manager")
 	<-ctx.Done()
 	log.Info("app.stopped")
 }

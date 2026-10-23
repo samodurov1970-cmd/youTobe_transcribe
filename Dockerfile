@@ -6,17 +6,11 @@ RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
 
-# Сборка основного сервиса (запускает каналы, куки и видео)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/youtube_transcribe ./cmd/main
+# Сборка основного сервиса (каналы, куки, видео, статистика, валидатор, trash_manager)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/main ./cmd/main
 
-# Сборка микросервиса каналов (опционально, если нужен отдельный бинарник)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/channels ./cmd/channels
-
-# Сборка микросервиса проверки куки (опционально)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/cookies ./cmd/cookies
-
-# Сборка микросервиса сбора видео (опционально)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/videos ./cmd/videos
+# Сборка микросервиса транскрибации (отдельно, для быстрой остановки)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/transcribe ./cmd/transcribe
 
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates ffmpeg python3 py3-pip bash curl unzip nodejs
@@ -31,14 +25,12 @@ RUN pip3 install --no-cache-dir --break-system-packages yt-dlp yt-dlp-ejs \
 
 WORKDIR /app/n8n
 
-# Копируем все бинарники
-COPY --from=builder /app/n8n/youtube_transcribe /app/n8n/youtube_transcribe
-COPY --from=builder /app/n8n/channels /app/n8n/channels
-COPY --from=builder /app/n8n/cookies /app/n8n/cookies
-COPY --from=builder /app/n8n/videos /app/n8n/videos
+# Копируем бинарники
+COPY --from=builder /app/n8n/main /app/n8n/main
+COPY --from=builder /app/n8n/transcribe /app/n8n/transcribe
 
 # Копируем куки
 COPY internal/cookies/cookies.txt /cookies/cookies.txt
 
 # По умолчанию запускаем основной сервис
-CMD ["/app/n8n/youtube_transcribe"]
+CMD ["/app/n8n/main"]

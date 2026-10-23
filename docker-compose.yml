@@ -63,12 +63,12 @@ services:
     networks:
       - default
 
-  youtube_transcribe:
+  main:
     build: .
-    container_name: youtube_transcribe
+    container_name: main
     restart: unless-stopped
     working_dir: /app/n8n
-    command: ["/app/n8n/youtube_transcribe"]
+    command: ["/app/n8n/main"]
     environment:
       - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
       - OBSIDIAN_PATH=/obsidian
@@ -95,6 +95,30 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  transcribe:
+    build: .
+    container_name: transcribe
+    restart: unless-stopped
+    working_dir: /app/n8n
+    command: ["/app/n8n/transcribe"]
+    environment:
+      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
+      - YT_DLP_PATH=/usr/local/bin/yt-dlp
+      - COOKIES_FILE=/cookies/cookies.txt
+      - TRANSCRIPTION_URL=${TRANSCRIPTION_URL:-https://groq-whisper-proxy.matsgraaf17.workers.dev}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - APP_ENV=${APP_ENV:-production}
+    volumes:
+      - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
+    depends_on:
+      postgres:
+        condition: service_healthy
     logging:
       driver: json-file
       options:

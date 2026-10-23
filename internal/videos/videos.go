@@ -24,7 +24,7 @@ func NewCollector(ytDlpPath, cookiesFile string, log *slog.Logger) *Collector {
 	return &Collector{
 		YtDlpPath:   ytDlpPath,
 		CookiesFile: cookiesFile,
-		Log:         log.With("component", "videos"), // <-- ДОБАВЛЕНО
+		Log:         log.With("component", "videos"),
 	}
 }
 
