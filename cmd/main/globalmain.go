@@ -30,7 +30,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 1. Запуск каналов
+	// 1. Запуск каналов (раз в 60 минут)
 	channelsSvc := channels.NewService(&channels.Config{
 		DB:                     storage.DB,
 		YtDlpPath:              cfg.YtDlpPath,
@@ -45,7 +45,7 @@ func main() {
 	})
 	go channelsSvc.Run(ctx)
 
-	// 2. Запуск проверки куки (раз в час с отчётом)
+	// 2. Запуск проверки куки (в 9:00 и 21:00)
 	checker := cookies.NewChecker(
 		cfg.YtDlpPath,
 		cfg.CookiesFile,
@@ -54,13 +54,18 @@ func main() {
 		log,
 	)
 	go func() {
-		// Первая проверка и отчёт
+		// Первая проверка сразу при старте
 		err := checker.Check(ctx)
 		checker.SendReport(ctx, err)
 
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
+		for {
+			next := nextTime(9, 0)
+			if next.Before(time.Now().Add(1 * time.Minute)) {
+				next = nextTime(21, 0)
+			}
+			log.Info("cookies.next_check", "next", next.Format("15:04"))
+			time.Sleep(time.Until(next))
+
 			err := checker.Check(ctx)
 			checker.SendReport(ctx, err)
 		}
@@ -69,7 +74,6 @@ func main() {
 	// 3. Запуск сбора видео (раз в 3 часа)
 	collector := videos.NewCollector(cfg.YtDlpPath, cfg.CookiesFile, log)
 	go func() {
-		// Первый запуск сразу при старте
 		if err := collector.Run(ctx); err != nil {
 			log.Error("videos.failed", "error", err.Error())
 		}
@@ -83,29 +87,34 @@ func main() {
 		}
 	}()
 
-	// 4. Часовой отчёт по видео в Telegram
+	// 4. Ежедневная статистика по видео (раз в сутки в 00:00)
 	go func() {
-		// Первый отчёт сразу при старте
-		stats, err := storage.GetVideoStats()
-		if err == nil {
-			checker.SendDailyStats(ctx, stats)
-		} else {
-			log.Error("hourly_stats.failed", "error", err.Error())
-		}
+		for {
+			now := time.Now()
+			next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+			log.Info("stats.next_daily", "next", next.Format("02.01.2006 15:04"))
+			time.Sleep(time.Until(next))
 
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
 			stats, err := storage.GetVideoStats()
 			if err != nil {
-				log.Error("hourly_stats.failed", "error", err.Error())
+				log.Error("daily_stats.failed", "error", err.Error())
 				continue
 			}
 			checker.SendDailyStats(ctx, stats)
 		}
 	}()
 
-	log.Info("app.started", "services", "channels, cookies, videos, hourly_stats")
+	log.Info("app.started", "services", "channels, cookies (9:00, 21:00), videos (3h), daily_stats (00:00)")
 	<-ctx.Done()
 	log.Info("app.stopped")
+}
+
+// nextTime возвращает ближайшее время с указанным часом и минутой.
+func nextTime(hour, minute int) time.Time {
+	now := time.Now()
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next
 }

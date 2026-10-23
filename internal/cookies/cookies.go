@@ -41,7 +41,7 @@ func NewChecker(ytDlpPath, cookiesFile, telegramToken, telegramChatID string, lo
 func (c *Checker) Check(ctx context.Context) error {
 	url := "https://youtu.be/" + c.TestVideoID
 	args := []string{
-		"--js-runtimes", "deno:/root/.deno/bin/deno",
+		"--js-runtimes", "node", // <-- Заменили deno на node
 		"--remote-components", "ejs:npm",
 		"--cookies", c.CookiesFile,
 		"--no-playlist",
@@ -83,7 +83,6 @@ func (c *Checker) SendReport(ctx context.Context, err error) {
 		return
 	}
 
-	// Форматируем дату по-русски
 	now := time.Now().Format("02.01.2006 15:04:05")
 
 	var text string
@@ -92,7 +91,6 @@ func (c *Checker) SendReport(ctx context.Context, err error) {
 			"📅 Дата проверки: %s\n"+
 			"🍪 Куки актуальны. Всё работает в штатном режиме.", now)
 	} else {
-		// Обрезаем ошибку до 300 символов
 		errText := err.Error()
 		if len(errText) > 300 {
 			errText = errText[:300] + "..."
@@ -101,9 +99,9 @@ func (c *Checker) SendReport(ctx context.Context, err error) {
 			"📅 Дата проверки: %s\n"+
 			"⚠️ Причина: %s\n\n"+
 			"<b>Что делать:</b>\n"+
-			"1. Откройте YouTube в браузере (под аккаунтом).\n"+
-			"2. Обновите cookies.txt (расширение Get cookies.txt LOCALLY).\n"+
-			"3. Замените файл internal/cookies/cookies.txt", now, errText)
+			"1. Проверьте логи контейнера (возможно, проблема с yt-dlp или node).\n"+
+			"2. Если ошибка про куки — обновите cookies.txt.\n"+
+			"3. Перезапустите контейнер.", now, errText)
 	}
 
 	c.sendTelegram(ctx, text, "cookies.report_sent")

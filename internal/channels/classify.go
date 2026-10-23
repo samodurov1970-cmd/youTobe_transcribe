@@ -67,6 +67,10 @@ var tradingKeywords = []string{
 	"wallstreet", "stocktwits",
 	"трейдинг", "инвестиции", "инвестици", "финанс", "экономика",
 	"брокер", "рынок", "акции", "облигации", "маркет",
+	// Крипта, тапалки, дропы
+	"крипт", "крипта", "биткоин", "btc", "eth", "тапалка", "тапалки", "дроп", "дропы",
+	"tapalka", "drop", "airdrop", "paws", "dogs", "binance", "bybit", "toncoin",
+	"пайонир", "payoneer", "bitcoin", "ethereum", "solana", "blockchain",
 }
 
 var singleWordTradingKeywords = []string{
