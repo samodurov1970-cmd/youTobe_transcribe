@@ -125,6 +125,28 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  webui:
+    build: .
+    container_name: webui
+    restart: unless-stopped
+    working_dir: /app/n8n
+    command: ["/app/n8n/webui"]
+    ports:
+      - "8081:8081"
+    environment:
+      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
+      - WEBUI_ADDR=:8081
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - APP_ENV=${APP_ENV:-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   n8n_postgres_data:
     external: true

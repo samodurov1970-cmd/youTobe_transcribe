@@ -12,6 +12,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/main ./cmd/main
 # Сборка микросервиса транскрибации (отдельно, для быстрой остановки)
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/transcribe ./cmd/transcribe
 
+# Сборка веб-интерфейса (trash и другие микросервисы)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/n8n/webui ./cmd/webui
+
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates ffmpeg python3 py3-pip bash curl unzip nodejs
 
@@ -28,6 +31,7 @@ WORKDIR /app/n8n
 # Копируем бинарники
 COPY --from=builder /app/n8n/main /app/n8n/main
 COPY --from=builder /app/n8n/transcribe /app/n8n/transcribe
+COPY --from=builder /app/n8n/webui /app/n8n/webui
 
 # Копируем куки
 COPY internal/cookies/cookies.txt /cookies/cookies.txt
