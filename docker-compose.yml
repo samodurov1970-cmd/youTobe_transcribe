@@ -80,7 +80,7 @@ services:
       - TRANSCRIPTION_URL=${TRANSCRIPTION_URL:-https://groq-whisper-proxy.matsgraaf17.workers.dev}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - APP_ENV=${APP_ENV:-production}
-      - CHANNELS_UPDATE_INTERVAL=${CHANNELS_UPDATE_INTERVAL:-1m}
+      - CHANNELS_UPDATE_INTERVAL=${CHANNELS_UPDATE_INTERVAL:-60m}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
@@ -94,59 +94,6 @@ services:
       postgres:
         condition: service_healthy
       ollama:
-        condition: service_started
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  channels:
-    build: .
-    container_name: channels
-    restart: unless-stopped
-    working_dir: /app/n8n
-    command: ["/app/n8n/channels"]
-    environment:
-      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
-      - YT_DLP_PATH=/usr/local/bin/yt-dlp
-      - COOKIES_FILE=/cookies/cookies.txt
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - APP_ENV=${APP_ENV:-production}
-      - CHANNELS_UPDATE_INTERVAL=${CHANNELS_UPDATE_INTERVAL:-1m}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
-      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-15s}
-      - OLLAMA_VIDEO_TITLES_LIMIT=${OLLAMA_VIDEO_TITLES_LIMIT:-10}
-    volumes:
-      - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
-    depends_on:
-      postgres:
-        condition: service_healthy
-      ollama:
-        condition: service_started
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  cookies:
-    build: .
-    container_name: cookies
-    restart: unless-stopped
-    working_dir: /app/n8n
-    command: ["/app/n8n/cookies"]
-    environment:
-      - YT_DLP_PATH=/usr/local/bin/yt-dlp
-      - COOKIES_FILE=/cookies/cookies.txt
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-    volumes:
-      - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
-    depends_on:
-      channels:
         condition: service_started
     logging:
       driver: json-file

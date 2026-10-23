@@ -12,6 +12,7 @@ import (
 	"youTobe_transcribe/internal/cookies"
 	"youTobe_transcribe/internal/logger"
 	"youTobe_transcribe/internal/storage"
+	"youTobe_transcribe/internal/videos"
 )
 
 func main() {
@@ -29,7 +30,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Запуск каналов
+	// 1. Запуск каналов
 	channelsSvc := channels.NewService(&channels.Config{
 		DB:                     storage.DB,
 		YtDlpPath:              cfg.YtDlpPath,
@@ -44,7 +45,7 @@ func main() {
 	})
 	go channelsSvc.Run(ctx)
 
-	// Запуск проверки куки (раз в час с отчётом)
+	// 2. Запуск проверки куки (раз в час с отчётом)
 	checker := cookies.NewChecker(
 		cfg.YtDlpPath,
 		cfg.CookiesFile,
@@ -65,7 +66,46 @@ func main() {
 		}
 	}()
 
-	log.Info("app.started", "services", "channels, cookies")
+	// 3. Запуск сбора видео (раз в 3 часа)
+	collector := videos.NewCollector(cfg.YtDlpPath, cfg.CookiesFile, log)
+	go func() {
+		// Первый запуск сразу при старте
+		if err := collector.Run(ctx); err != nil {
+			log.Error("videos.failed", "error", err.Error())
+		}
+
+		ticker := time.NewTicker(3 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := collector.Run(ctx); err != nil {
+				log.Error("videos.failed", "error", err.Error())
+			}
+		}
+	}()
+
+	// 4. Часовой отчёт по видео в Telegram
+	go func() {
+		// Первый отчёт сразу при старте
+		stats, err := storage.GetVideoStats()
+		if err == nil {
+			checker.SendDailyStats(ctx, stats)
+		} else {
+			log.Error("hourly_stats.failed", "error", err.Error())
+		}
+
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			stats, err := storage.GetVideoStats()
+			if err != nil {
+				log.Error("hourly_stats.failed", "error", err.Error())
+				continue
+			}
+			checker.SendDailyStats(ctx, stats)
+		}
+	}()
+
+	log.Info("app.started", "services", "channels, cookies, videos, hourly_stats")
 	<-ctx.Done()
 	log.Info("app.stopped")
 }
