@@ -15,6 +15,7 @@ services:
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-admin}
       - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
       - VUE_APP_URL_BASE_API=/
+      - TZ=Europe/Minsk
     volumes:
       - n8n_n8n_data:/home/node/.n8n
     networks:
@@ -32,6 +33,7 @@ services:
       POSTGRES_USER: peter
       POSTGRES_PASSWORD: peter
       POSTGRES_DB: youtube_tracker
+      TZ: Europe/Minsk
     ports:
       - "5432:5432"
     volumes:
@@ -51,7 +53,9 @@ services:
     container_name: ollama
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "11435:11434"
+    environment:
+      - TZ=Europe/Minsk
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
@@ -87,6 +91,7 @@ services:
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
       - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-15s}
       - OLLAMA_VIDEO_TITLES_LIMIT=${OLLAMA_VIDEO_TITLES_LIMIT:-10}
+      - TZ=Europe/Minsk
     volumes:
       - C:/Users/user/Obsidian:/obsidian
       - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
@@ -114,6 +119,7 @@ services:
       - TRANSCRIPTION_URL=${TRANSCRIPTION_URL:-https://groq-whisper-proxy.matsgraaf17.workers.dev}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - APP_ENV=${APP_ENV:-production}
+      - TZ=Europe/Minsk
     volumes:
       - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
     depends_on:
@@ -138,6 +144,7 @@ services:
       - WEBUI_ADDR=:8081
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - APP_ENV=${APP_ENV:-production}
+      - TZ=Europe/Minsk
     depends_on:
       postgres:
         condition: service_healthy

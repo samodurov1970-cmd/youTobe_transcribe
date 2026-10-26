@@ -2,17 +2,16 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"time"
 
 	"youTobe_transcribe/internal/cookies"
+	"youTobe_transcribe/internal/logger"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	logger.Init()
+	log := logger.Log.With("component", "cookies")
 
 	ytDlpPath := os.Getenv("YT_DLP_PATH")
 	if ytDlpPath == "" {
@@ -27,7 +26,7 @@ func main() {
 
 	checker := cookies.NewChecker(ytDlpPath, cookiesFile, telegramToken, telegramChatID, log)
 
-	log.Info("cookies.started", "interval", "1h")
+	log.Info("cookies.started", "interval", "1h", "описание", "Микросервис проверки куки запущен")
 
 	ctx := context.Background()
 	err := checker.Check(ctx)

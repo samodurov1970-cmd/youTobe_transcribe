@@ -24,7 +24,7 @@ func main() {
 	cfg := config.Load()
 
 	if err := storage.Init(cfg.DatabaseURL); err != nil {
-		log.Error("storage.init_failed", "error", err.Error())
+		log.Error("storage.init_failed", "error", err.Error(), "описание", "ОШИБКА: Не удалось подключиться к базе данных")
 		os.Exit(1)
 	}
 	defer storage.DB.Close()
@@ -65,7 +65,7 @@ func main() {
 			if next.Before(time.Now().Add(1 * time.Minute)) {
 				next = nextTime(21, 0)
 			}
-			log.Info("cookies.next_check", "next", next.Format("15:04"))
+			log.Info("cookies.next_check", "next", next.Format("15:04"), "описание", "Запланирована следующая проверка куки")
 			time.Sleep(time.Until(next))
 
 			err := checker.Check(ctx)
@@ -77,14 +77,14 @@ func main() {
 	collector := videos.NewCollector(cfg.YtDlpPath, cfg.CookiesFile, log)
 	go func() {
 		if err := collector.Run(ctx); err != nil {
-			log.Error("videos.failed", "error", err.Error())
+			log.Error("videos.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой при сборе видео")
 		}
 
 		ticker := time.NewTicker(3 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
 			if err := collector.Run(ctx); err != nil {
-				log.Error("videos.failed", "error", err.Error())
+				log.Error("videos.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой при сборе видео")
 			}
 		}
 	}()
@@ -94,12 +94,12 @@ func main() {
 		for {
 			now := time.Now()
 			next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
-			log.Info("stats.next_daily", "next", next.Format("02.01.2006 15:04"))
+			log.Info("stats.next_daily", "next", next.Format("02.01.2006 15:04"), "описание", "Запланирована ежедневная статистика")
 			time.Sleep(time.Until(next))
 
 			stats, err := storage.GetVideoStats()
 			if err != nil {
-				log.Error("daily_stats.failed", "error", err.Error())
+				log.Error("daily_stats.failed", "error", err.Error(), "описание", "ОШИБКА: Не удалось получить статистику видео")
 				continue
 			}
 			checker.SendDailyStats(ctx, stats)
@@ -110,13 +110,13 @@ func main() {
 	validatorSvc := validator.NewValidator(log)
 	go func() {
 		if err := validatorSvc.Run(ctx); err != nil {
-			log.Error("validator.failed", "error", err.Error())
+			log.Error("validator.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой валидатора")
 		}
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			if err := validatorSvc.Run(ctx); err != nil {
-				log.Error("validator.failed", "error", err.Error())
+				log.Error("validator.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой валидатора")
 			}
 		}
 	}()
@@ -125,20 +125,20 @@ func main() {
 	trashSvc := trash_manager.NewManager(log)
 	go func() {
 		if err := trashSvc.Run(ctx); err != nil {
-			log.Error("trash_manager.failed", "error", err.Error())
+			log.Error("trash_manager.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой менеджера корзины")
 		}
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			if err := trashSvc.Run(ctx); err != nil {
-				log.Error("trash_manager.failed", "error", err.Error())
+				log.Error("trash_manager.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой менеджера корзины")
 			}
 		}
 	}()
 
-	log.Info("app.started", "services", "channels, cookies, videos, stats, validator, trash_manager")
+	log.Info("app.started", "services", "channels, cookies, videos, stats, validator, trash_manager", "описание", "Главный процесс запущен, все подсистемы работают")
 	<-ctx.Done()
-	log.Info("app.stopped")
+	log.Info("app.stopped", "описание", "Главный процесс остановлен")
 }
 
 // nextTime возвращает ближайшее время с указанным часом и минутой.

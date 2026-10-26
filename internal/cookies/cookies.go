@@ -12,8 +12,12 @@ import (
 
 	"log/slog"
 
+	"youTobe_transcribe/internal/logger"
 	"youTobe_transcribe/internal/storage"
 )
+
+// Component — имя подсистемы для атрибута component в логах.
+const Component = "cookies"
 
 // Checker проверяет актуальность куки для YouTube через yt-dlp.
 type Checker struct {
@@ -26,7 +30,9 @@ type Checker struct {
 }
 
 // NewChecker создает новый проверяльщик куки.
-func NewChecker(ytDlpPath, cookiesFile, telegramToken, telegramChatID string, log *slog.Logger) *Checker {
+// Внешний логгер игнорируется, чтобы гарантировать component=cookies.
+func NewChecker(ytDlpPath, cookiesFile, telegramToken, telegramChatID string, _ *slog.Logger) *Checker {
+	log := logger.Log.With("component", Component)
 	return &Checker{
 		YtDlpPath:      ytDlpPath,
 		CookiesFile:    cookiesFile,
@@ -37,11 +43,21 @@ func NewChecker(ytDlpPath, cookiesFile, telegramToken, telegramChatID string, lo
 	}
 }
 
+// getMinskLocation возвращает часовой пояс Минска или UTC+3, если загрузить не удалось.
+func getMinskLocation() *time.Location {
+	loc, err := time.LoadLocation("Europe/Minsk")
+	if err != nil {
+		// Если tzdata не установлена, используем фиксированный сдвиг +3 часа
+		return time.FixedZone("MSK", 3*60*60)
+	}
+	return loc
+}
+
 // Check запускает yt-dlp с куки и проверяет, возвращает ли он длительность видео.
 func (c *Checker) Check(ctx context.Context) error {
 	url := "https://youtu.be/" + c.TestVideoID
 	args := []string{
-		"--js-runtimes", "node", // <-- Заменили deno на node
+		"--js-runtimes", "node",
 		"--remote-components", "ejs:npm",
 		"--cookies", c.CookiesFile,
 		"--no-playlist",
@@ -72,18 +88,19 @@ func (c *Checker) Check(ctx context.Context) error {
 		}
 	}
 
-	c.Log.Info("cookies.valid", "duration", duration)
+	c.Log.Info("cookies.valid", "duration", duration, "описание", "Куки валидны, yt-dlp успешно получил длительность видео")
 	return nil
 }
 
 // SendReport отправляет отчёт о статусе куки в Telegram.
 func (c *Checker) SendReport(ctx context.Context, err error) {
 	if c.TelegramToken == "" || c.TelegramChatID == "" {
-		c.Log.Warn("cookies.telegram_skipped", "reason", "not_configured")
+		c.Log.Warn("cookies.telegram_skipped", "reason", "not_configured", "описание", "Отправка в Telegram пропущена: не задан токен или chat_id")
 		return
 	}
 
-	now := time.Now().Format("02.01.2006 15:04:05")
+	// Получаем минское время
+	now := time.Now().In(getMinskLocation()).Format("02.01.2006 15:04:05")
 
 	var text string
 	if err == nil {
@@ -104,17 +121,18 @@ func (c *Checker) SendReport(ctx context.Context, err error) {
 			"3. Перезапустите контейнер.", now, errText)
 	}
 
-	c.sendTelegram(ctx, text, "cookies.report_sent")
+	c.sendTelegram(ctx, text, "cookies.report_sent", "Отчёт о статусе куки отправлен в Telegram")
 }
 
 // SendDailyStats отправляет ежедневный отчёт по видео в Telegram.
 func (c *Checker) SendDailyStats(ctx context.Context, stats storage.VideoStats) {
 	if c.TelegramToken == "" || c.TelegramChatID == "" {
-		c.Log.Warn("cookies.stats_telegram_skipped", "reason", "not_configured")
+		c.Log.Warn("cookies.stats_telegram_skipped", "reason", "not_configured", "описание", "Отправка статистики в Telegram пропущена: не задан токен или chat_id")
 		return
 	}
 
-	now := time.Now().Format("02.01.2006")
+	// Получаем минское время
+	now := time.Now().In(getMinskLocation()).Format("02.01.2006")
 	text := fmt.Sprintf("📊 <b>Статистика за %s</b>\n\n"+
 		"🆕 Добавлено за сутки: <b>%d</b>\n"+
 		"📚 Всего видео в базе: <b>%d</b>\n"+
@@ -122,11 +140,11 @@ func (c *Checker) SendDailyStats(ctx context.Context, stats storage.VideoStats) 
 		"⏳ Не обработано: <b>%d</b>",
 		now, stats.Today, stats.Total, stats.Processed, stats.Unprocessed)
 
-	c.sendTelegram(ctx, text, "cookies.stats_sent")
+	c.sendTelegram(ctx, text, "cookies.stats_sent", "Ежедневная статистика по видео отправлена в Telegram")
 }
 
 // sendTelegram — вспомогательная функция для отправки сообщений.
-func (c *Checker) sendTelegram(ctx context.Context, text string, logMsg string) {
+func (c *Checker) sendTelegram(ctx context.Context, text string, logMsg string, logDesc string) {
 	payload := map[string]interface{}{
 		"chat_id":                  c.TelegramChatID,
 		"text":                     text,
@@ -141,14 +159,14 @@ func (c *Checker) sendTelegram(ctx context.Context, text string, logMsg string) 
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		c.Log.Error(logMsg+"_failed", "error", err.Error())
+		c.Log.Error(logMsg+"_failed", "error", err.Error(), "описание", "ОШИБКА: Не удалось отправить сообщение в Telegram")
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		c.Log.Error(logMsg+"_failed", "status", resp.StatusCode)
+		c.Log.Error(logMsg+"_failed", "status", resp.StatusCode, "описание", "ОШИБКА: Telegram API вернул ошибочный статус")
 		return
 	}
-	c.Log.Info(logMsg)
+	c.Log.Info(logMsg, "описание", logDesc)
 }

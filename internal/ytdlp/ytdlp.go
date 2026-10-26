@@ -15,9 +15,10 @@ import (
 // Args возвращает базовые аргументы yt-dlp.
 func Args(extra ...string) []string {
 	base := []string{
-		"--js-runtimes", "node",
+		"--js-runtimes", "deno",
 		"--remote-components", "ejs:github",
 		"--no-playlist",
+		"--extractor-args", "youtube:player_client=web,mweb",
 	}
 	return append(base, extra...)
 }
@@ -42,6 +43,49 @@ func Run(ytDlpPath string, args ...string) (string, error) {
 		)
 	}
 	return string(out), err
+}
+
+// GetDuration возвращает длительность видео в секундах.
+func GetDuration(ytDlpPath, videoURL string) (int, error) {
+	out, err := Run(ytDlpPath, "--get-duration", videoURL)
+	if err != nil {
+		return 0, err
+	}
+
+	// yt-dlp может выводить WARNING в stdout перед длительностью.
+	// Берем последнюю непустую строку, в ней должна быть длительность.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var raw string
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			raw = line
+			break
+		}
+	}
+	if raw == "" {
+		return 0, fmt.Errorf("empty duration")
+	}
+
+	// Парсим формат "HH:MM:SS" или "MM:SS" или просто секунды
+	parts := strings.Split(raw, ":")
+	switch len(parts) {
+	case 3:
+		var h, m, s int
+		fmt.Sscanf(parts[0], "%d", &h)
+		fmt.Sscanf(parts[1], "%d", &m)
+		fmt.Sscanf(parts[2], "%d", &s)
+		return h*3600 + m*60 + s, nil
+	case 2:
+		var m, s int
+		fmt.Sscanf(parts[0], "%d", &m)
+		fmt.Sscanf(parts[1], "%d", &s)
+		return m*60 + s, nil
+	default:
+		var s int
+		fmt.Sscanf(raw, "%d", &s)
+		return s, nil
+	}
 }
 
 // DownloadAudio скачивает аудио с YouTube и возвращает путь к файлу.

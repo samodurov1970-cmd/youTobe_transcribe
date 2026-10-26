@@ -25,7 +25,8 @@ func main() {
 	}
 	defer storage.DB.Close()
 
-	svc := transcribe.NewWorker(cfg.YtDlpPath, cfg.TranscriptionURL, log)
+	// Передаем только YtDlpPath и logger
+	svc := transcribe.NewWorker(cfg.YtDlpPath, log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -38,9 +39,15 @@ func main() {
 
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		if err := svc.Run(ctx); err != nil {
-			log.Error("transcribe.failed", "error", err.Error())
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("transcribe.stopped")
+			return
+		case <-ticker.C:
+			if err := svc.Run(ctx); err != nil {
+				log.Error("transcribe.failed", "error", err.Error())
+			}
 		}
 	}
 }
