@@ -20,3 +20,8 @@ Thumbs.db
 # Large files (>100MB)
 backup/pg_dumpall_*.sql
 n8n_workflow_backup.sql
+
+backup/
+videos_export.csv
+temp.txt
+results.csv

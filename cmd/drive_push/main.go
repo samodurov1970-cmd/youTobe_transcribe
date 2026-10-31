@@ -1,9 +1,11 @@
 // cd C:\Users\user\GO\youTobe_transcribe
-//rclone copy .\videos_export.csv gdrive:yt_transcribe/ -v
+// go build -o .\drive_push.exe .\cmd\drive_push
+// .\drive_push.exe
 
 package main
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"os"
 	"os/exec"
@@ -11,6 +13,13 @@ import (
 	"youTobe_transcribe/internal/config"
 	"youTobe_transcribe/internal/logger"
 	"youTobe_transcribe/internal/storage"
+)
+
+const (
+	topic    = "обучение_торговле_на_рынках"
+	limit    = 500
+	csvFile  = "videos_export.csv"
+	driveDir = "gdrive:yt_transcribe/"
 )
 
 func main() {
@@ -24,36 +33,43 @@ func main() {
 	}
 	defer storage.DB.Close()
 
-	// 1. Берем 500 новых видео по торговле
 	rows, err := storage.DB.Query(`
-		SELECT video_id, video_url 
-		FROM videos 
-		WHERE is_processed = false AND channel_topic = 'обучение_торговле_на_рынках'
-		ORDER BY published_at DESC 
-		LIMIT 500
-	`)
+		SELECT video_id, video_url, channel_name, channel_topic
+		FROM videos
+		WHERE is_processed = false AND channel_topic = $1
+		ORDER BY published_at DESC
+		LIMIT $2
+	`, topic, limit)
 	if err != nil {
 		log.Error("drive_push.query_failed", "error", err.Error(), "описание", "ОШИБКА: Не удалось выполнить запрос к БД")
 		os.Exit(1)
 	}
 	defer rows.Close()
 
-	file, err := os.Create("videos_export.csv")
+	file, err := os.Create(csvFile)
 	if err != nil {
 		log.Error("drive_push.file_failed", "error", err.Error(), "описание", "ОШИБКА: Не удалось создать файл videos_export.csv")
 		os.Exit(1)
 	}
 
 	writer := csv.NewWriter(file)
-	writer.Write([]string{"video_id", "video_url"})
+	writer.Write([]string{"video_id", "video_url", "channel_name", "channel_topic", "file_name"})
 
 	count := 0
 	for rows.Next() {
-		var videoID, videoURL string
-		if err := rows.Scan(&videoID, &videoURL); err != nil {
+		var videoID, videoURL, channelName, channelTopic sql.NullString
+		if err := rows.Scan(&videoID, &videoURL, &channelName, &channelTopic); err != nil {
+			log.Warn("drive_push.scan_failed", "error", err.Error(), "описание", "Пропуск строки при Scan")
 			continue
 		}
-		writer.Write([]string{videoID, videoURL})
+		fileName := videoID.String + ".txt"
+		writer.Write([]string{
+			videoID.String,
+			videoURL.String,
+			channelName.String,
+			channelTopic.String,
+			fileName,
+		})
 		count++
 	}
 	writer.Flush()
@@ -66,14 +82,13 @@ func main() {
 		return
 	}
 
-	// 2. Отправляем на Google Диск через rclone
 	log.Info("drive_push.rclone_start", "описание", "Отправка файла на Google Диск...")
-	cmd := exec.Command("rclone", "copy", "videos_export.csv", "gdrive:yt_transcribe/")
+	cmd := exec.Command("rclone", "copy", csvFile, driveDir)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Error("drive_push.rclone_failed", "error", err.Error(), "output", string(out), "описание", "ОШИБКА: rclone не смог отправить файл")
 		os.Exit(1)
 	}
 
-	log.Info("drive_push.done", "описание", "Файл успешно отправлен на Google Диск (папка yt_transcribe)")
+	log.Info("drive_push.done", "count", count, "описание", "Файл успешно отправлен на Google Диск (папка yt_transcribe)")
 }

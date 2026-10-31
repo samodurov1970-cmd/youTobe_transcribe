@@ -7,33 +7,22 @@ import (
 
 func TestBuildPrompt(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		prompt := buildPrompt("My Channel", "Some description", []string{"Video 1", "Video 2"})
-
+		prompt := buildPrompt("My Channel", "Some description")
 		if !strings.Contains(prompt, "Channel name: My Channel") {
 			t.Errorf("prompt should contain channel name")
 		}
-		if !strings.Contains(prompt, "Channel description: Some description") {
+		if !strings.Contains(prompt, "Description: Some description") {
 			t.Errorf("prompt should contain description")
 		}
-		if !strings.Contains(prompt, "1. Video 1") {
-			t.Errorf("prompt should contain first video title")
-		}
-		if !strings.Contains(prompt, "2. Video 2") {
-			t.Errorf("prompt should contain second video title")
-		}
-		if !strings.Contains(prompt, "Answer with ONLY one digit: 1, 2, or 3") {
+		if !strings.Contains(prompt, "Answer with one digit (1, 2, or 3)") {
 			t.Errorf("prompt should contain classification instruction")
 		}
 	})
 
 	t.Run("empty_description", func(t *testing.T) {
-		prompt := buildPrompt("Test Channel", "", nil)
-
-		if strings.Contains(prompt, "Channel description:") {
+		prompt := buildPrompt("Test Channel", "")
+		if strings.Contains(prompt, "Description:") {
 			t.Errorf("prompt should not contain description section when empty")
-		}
-		if strings.Contains(prompt, "Recent video titles") {
-			t.Errorf("prompt should not contain video titles section when empty")
 		}
 	})
 }

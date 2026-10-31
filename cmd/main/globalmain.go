@@ -72,7 +72,7 @@ func main() {
 		}
 	}()
 
-	// 3. Запуск сбора видео (БЕСКОНЕЧНЫЙ ЦИКЛ С ПАУЗОЙ 30 МИНУТ)
+	// 3. Запуск сбора видео (непрерывный цикл, пауза 15 минут после полного обхода)
 	collector := videos.NewCollector(cfg.YtDlpPath, cfg.CookiesFile, log)
 	go func() {
 		for {
@@ -84,8 +84,12 @@ func main() {
 			if err := collector.Run(ctx); err != nil {
 				log.Error("videos.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой при сборе видео")
 			}
-			// Пауза 30 минут между циклами
-			time.Sleep(30 * time.Minute)
+			// Пауза 15 минут после полного обхода всех каналов
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(15 * time.Minute):
+			}
 		}
 	}()
 

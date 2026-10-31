@@ -124,37 +124,37 @@ func splitWords(text string) []string {
 func classifyChannel(channelName, description string) (string, bool) {
 	text := strings.ToLower(channelName + " " + description)
 
-	for _, kw := range newsKeywords {
-		if containsKeyword(text, kw) {
-			return TopicNews, true
-		}
-	}
-
+	// 1. Аквариум — самый четкий признак
 	for _, kw := range aquariumKeywords {
 		if containsKeyword(text, kw) {
 			return TopicAquarium, false
 		}
 	}
 
-	for _, kw := range otherKeywords {
-		if containsKeyword(text, kw) {
-			return TopicNews, true
-		}
-	}
-
+	// 2. Трейдинг — самое важное для нас (crypto, forex, stock)
 	for _, kw := range tradingKeywords {
 		if containsKeyword(text, kw) {
 			return TopicTrading, false
 		}
 	}
 
-	for _, kw := range singleWordTradingKeywords {
-		if strings.Contains(text, strings.ToLower(kw)) {
-			return TopicTrading, false
+	// 3. AI-технологии — ищем только целые фразы, чтобы не ловить "ai" в словах "said", "email", "domain"
+	aiTechPhrases := []string{"artificial intelligence", "нейросет", "chatgpt", "machine learning", "gpt", "llm"}
+	for _, kw := range aiTechPhrases {
+		if strings.Contains(text, kw) {
+			return TopicNews, true // AI-каналы всегда помечаем как новости
 		}
 	}
 
-	return TopicNews, true
+	// 4. Обычные новости
+	for _, kw := range newsKeywords {
+		if containsKeyword(text, kw) {
+			return TopicNews, true
+		}
+	}
+
+	// Ничего не найдено — возвращаем пустую строку, чтобы проверить вручную
+	return "", false
 }
 
 func classifyChannelWithLLM(llm *LLMClient, channelID, channelName, description string, videoTitles []string) (string, bool) {

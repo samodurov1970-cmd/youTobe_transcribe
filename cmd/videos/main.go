@@ -30,17 +30,22 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Info("videos.started", "interval", "3h")
+	log.Info("videos.started", "описание", "Запущен непрерывный сбор видео")
 
-	if err := collector.Run(ctx); err != nil {
-		log.Error("videos.failed", "error", err.Error())
-	}
-
-	ticker := time.NewTicker(3 * time.Hour)
-	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("videos.stopped", "описание", "Сбор видео остановлен")
+			return
+		default:
+		}
 		if err := collector.Run(ctx); err != nil {
 			log.Error("videos.failed", "error", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(15 * time.Minute):
 		}
 	}
 }

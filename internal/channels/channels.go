@@ -139,14 +139,10 @@ func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, kn
 				return fmt.Errorf("get topic for %s: %w", sub.ChannelID, err)
 			}
 			if topic == "" {
-				topic, _ = classifyChannelWithLLM(s.llm, sub.ChannelID, sub.Title, sub.Description, nil)
+				topic, _ = classifyChannel(sub.Title, sub.Description)
 			}
 		} else {
-			var titles []string
-			if s.llm != nil {
-				titles = s.fetchChannelVideoTitles(ctx, sub.ChannelID, sub.URL)
-			}
-			topic, _ = classifyChannelWithLLM(s.llm, sub.ChannelID, sub.Title, sub.Description, titles)
+			topic, _ = classifyChannel(sub.Title, sub.Description)
 		}
 
 		if err := upsertChannel(ctx, tx, sub, topic, true); err != nil {

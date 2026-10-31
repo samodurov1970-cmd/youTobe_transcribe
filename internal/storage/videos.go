@@ -30,6 +30,13 @@ type VideoStats struct {
 	Unprocessed int
 }
 
+// VideoExists проверяет, есть ли видео в БД.
+func VideoExists(videoID string) (bool, error) {
+	var exists bool
+	err := DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM videos WHERE video_id = $1)`, videoID).Scan(&exists)
+	return exists, err
+}
+
 // GetActiveChannels возвращает ТОЛЬКО торговые каналы.
 func GetActiveChannels() ([]Channel, error) {
 	rows, err := DB.Query(`
