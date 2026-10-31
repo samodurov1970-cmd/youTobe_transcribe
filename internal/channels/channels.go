@@ -1,13 +1,4 @@
 // Package channels реализует подсистему обновления списка YouTube-подписок.
-//
-// Сервис читает подписки через yt-dlp, классифицирует каждый канал с помощью
-// LLM и по ключевым словам.
-// Обновление выполняется сразу при старте и далее раз в 1 час.
-// Подсистема работает в отдельной горутине основной процесса
-// youtube_transcribe и использует общее подключение к базе данных.
-//
-// При появлении новой подписки отправляется уведомление в Telegram.
-// При появлении новой отписки отправляется уведомление в Telegram.
 package channels
 
 import (
@@ -26,41 +17,23 @@ import (
 	"github.com/lib/pq"
 )
 
-// Component — имя подсистемы для атрибута component в логах.
 const Component = "channels"
-
-// UpdateInterval — период обновления списка подписок по умолчанию (раз в сутки).
-// Фактический интервал задаётся через Config.UpdateInterval (env CHANNELS_UPDATE_INTERVAL).
 const UpdateInterval = 24 * time.Hour
-
-// subscriptionsURL — страница YouTube со списком подписок пользователя.
 const subscriptionsURL = "https://www.youtube.com/feed/channels"
 
-// Config — настройки подсистемы channels.
 type Config struct {
-	DB          *sql.DB
-	YtDlpPath   string
-	CookiesFile string
-	// UpdateInterval — период между обновлениями списка подписок.
-	// Если не задан, используется UpdateInterval по умолчанию.
-	UpdateInterval time.Duration
-	// TelegramToken — токен Telegram-бота для уведомлений о новых подписках.
-	// Пустое значение отключает уведомления.
-	TelegramToken string
-	// TelegramChatID — идентификатор чата Telegram для уведомлений.
-	// Пустое значение отключает уведомления.
-	TelegramChatID string
-	// OLLAMAURL — базовый адрес Ollama API для классификации тем каналов.
-	OLLAMAURL string
-	// OLLAMAModel — модель Ollama для классификации тем каналов.
-	OLLAMAModel string
-	// OLLAMATimeout — таймаут запроса к Ollama.
-	OLLAMATimeout time.Duration
-	// OLLAMAVideoTitlesLimit — сколько последних названий видео запрашивать у yt-dlp.
+	DB                     *sql.DB
+	YtDlpPath              string
+	CookiesFile            string
+	UpdateInterval         time.Duration
+	TelegramToken          string
+	TelegramChatID         string
+	OLLAMAURL              string
+	OLLAMAModel            string
+	OLLAMATimeout          time.Duration
 	OLLAMAVideoTitlesLimit int
 }
 
-// Service — подсистема обновления подписок.
 type Service struct {
 	db       *sql.DB
 	cfg      *Config
@@ -69,8 +42,6 @@ type Service struct {
 	log      *slog.Logger
 }
 
-// NewService создаёт сервис обновления подписок.
-// Логи наследуют базовый логгер приложения и помечаются полем component.
 func NewService(cfg *Config) *Service {
 	if cfg.UpdateInterval <= 0 {
 		cfg.UpdateInterval = UpdateInterval
@@ -86,14 +57,10 @@ func NewService(cfg *Config) *Service {
 	}
 }
 
-// Run выполняет обновление подписок сразу при старте, затем
-// периодически раз в UpdateInterval.
 func (s *Service) Run(ctx context.Context) {
 	s.processOnce(ctx)
-
 	ticker := time.NewTicker(s.cfg.UpdateInterval)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -105,74 +72,62 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-// processOnce один раз выполняет полный цикл обновления подписок.
 func (s *Service) processOnce(ctx context.Context) {
 	s.log.Info("channels.update_started", "описание", "Начато обновление списка подписок")
 
-	// 1. Снимок известных каналов до изменений
 	known, err := s.notifier.knownChannelIDs(ctx)
 	if err != nil {
-		s.log.Error("channels.known_channels_failed", 
-			"error", err.Error(),
+		s.log.Error("channels.known_channels_failed", "error", err.Error(),
 			"описание", "ОШИБКА: Не удалось получить список известных каналов из БД (продолжаем работу)")
 		known = map[string]bool{}
 	}
 
-	// 2. Получаем список подписок из YouTube
 	subs, err := s.fetchSubscriptions(ctx)
 	if err != nil {
-		s.log.Error("channels.fetch_failed", 
-			"error", err.Error(),
+		s.log.Error("channels.fetch_failed", "error", err.Error(),
 			"описание", "ОШИБКА: Не удалось получить список подписок через yt-dlp")
 		return
 	}
 	s.log.Info("channels.fetched", "count", len(subs), "описание", "Список подписок успешно получен")
 
-	// 3. СНАЧАЛА проверяем отписки и удаляем данные
 	_, gone, err := s.markUnsubscribed(ctx, subs)
 	if err != nil {
-		s.log.Error("channels.unsubscribe_failed", 
-			"error", err.Error(),
+		s.log.Error("channels.unsubscribe_failed", "error", err.Error(),
 			"описание", "ОШИБКА: Сбой при проверке отписок (транзакция откачена)")
 	}
 	if len(gone) > 0 {
-		s.log.Info("channels.unsub_notify_start", 
-			"count", len(gone), 
-			"ids", gone,
+		s.log.Info("channels.unsub_notify_start", "count", len(gone), "ids", gone,
 			"описание", "Найдены отписки, начинаем отправку уведомлений")
 		s.notifier.notifyUnsubscriptions(ctx, gone)
 	} else {
-		s.log.Info("channels.unsub_notify_skipped", 
-			"reason", "empty_gone",
+		s.log.Info("channels.unsub_notify_skipped", "reason", "empty_gone",
 			"описание", "Новых отписок не обнаружено, уведомления не отправляются")
 	}
 
-	// 4. ПОТОМ сохраняем новые подписки (восстанавливаем статус)
 	if err := s.saveSubscriptions(ctx, subs, known); err != nil {
-		s.log.Error("channels.save_failed", 
-			"error", err.Error(),
+		s.log.Error("channels.save_failed", "error", err.Error(),
 			"описание", "ОШИБКА: Не удалось сохранить новые подписки в базу данных")
 		return
 	}
 
-	// 5. Уведомления о новых подписках
 	s.notifier.notifyNewSubscriptions(ctx, known, subs)
 }
 
-// saveSubscriptions сохраняет список подписок в базу данных.
 func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, known map[string]bool) error {
-	tx, err := s.cfg.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
 	for _, sub := range subs {
+		tx, err := s.cfg.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin tx: %w", err)
+		}
+
 		exists, subscribed, err := channelExistsAndSubscribed(ctx, tx, sub.ChannelID)
 		if err != nil {
+			tx.Rollback()
 			return fmt.Errorf("check channel %s: %w", sub.ChannelID, err)
 		}
+
 		if exists && subscribed {
+			tx.Rollback()
 			continue
 		}
 
@@ -180,6 +135,7 @@ func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, kn
 		if exists && !subscribed {
 			topic, err = getChannelTopic(ctx, tx, sub.ChannelID)
 			if err != nil {
+				tx.Rollback()
 				return fmt.Errorf("get topic for %s: %w", sub.ChannelID, err)
 			}
 			if topic == "" {
@@ -194,17 +150,20 @@ func (s *Service) saveSubscriptions(ctx context.Context, subs []subscription, kn
 		}
 
 		if err := upsertChannel(ctx, tx, sub, topic, true); err != nil {
+			tx.Rollback()
 			return fmt.Errorf("upsert channel %s: %w", sub.ChannelID, err)
 		}
-	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit save tx: %w", err)
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit channel %s: %w", sub.ChannelID, err)
+		}
+
+		s.log.Info("channels.saved_one", "channel_id", sub.ChannelID, "channel_name", sub.Title, "topic", topic,
+			"описание", "Канал сохранен в БД")
 	}
 	return nil
 }
 
-// subscription — одна запись из списка YouTube подписок.
 type subscription struct {
 	ChannelID   string
 	Title       string
@@ -212,7 +171,6 @@ type subscription struct {
 	Description string
 }
 
-// channelsLLMClient создаёт клиент Ollama из конфигурации.
 func channelsLLMClient(cfg *Config) *LLMClient {
 	if cfg.OLLAMAURL == "" {
 		return nil
@@ -220,7 +178,6 @@ func channelsLLMClient(cfg *Config) *LLMClient {
 	return NewLLMClient(cfg.OLLAMAURL, cfg.OLLAMAModel, cfg.OLLAMATimeout)
 }
 
-// channelExistsAndSubscribed проверяет, существует ли канал в базе и подписан ли он.
 func channelExistsAndSubscribed(ctx context.Context, tx *sql.Tx, channelID string) (bool, bool, error) {
 	var exists, subscribed bool
 	err := tx.QueryRowContext(ctx, `
@@ -230,17 +187,14 @@ func channelExistsAndSubscribed(ctx context.Context, tx *sql.Tx, channelID strin
 	return exists, subscribed, err
 }
 
-// getChannelTopic получает тему канала из базы.
 func getChannelTopic(ctx context.Context, tx *sql.Tx, channelID string) (string, error) {
 	var topic string
 	err := tx.QueryRowContext(ctx,
-		`SELECT coalesce(topic, '') FROM channels WHERE channel_id = $1`,
-		channelID,
-	).Scan(&topic)
+		`SELECT coalesce(topic, '') FROM channels WHERE channel_id = $1`, channelID).Scan(&topic)
 	return topic, err
 }
 
-// upsertChannel вставляет или обновляет запись канала в базе.
+// upsertChannel — БЕЗ КОЛОНКИ is_news.
 func upsertChannel(ctx context.Context, tx *sql.Tx, sub subscription, topic string, subscribed bool) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO channels (channel_id, channel_name, channel_url, description, topic, is_subscribed, last_seen_at)
@@ -256,19 +210,11 @@ func upsertChannel(ctx context.Context, tx *sql.Tx, sub subscription, topic stri
 	return err
 }
 
-// fetchSubscriptions получает список подписок пользователя через yt-dlp.
 func (s *Service) fetchSubscriptions(ctx context.Context) ([]subscription, error) {
-	args := []string{
-		"--flat-playlist",
-		"--no-warnings",
-		"--dump-single-json",
-		subscriptionsURL,
-	}
-
+	args := []string{"--flat-playlist", "--no-warnings", "--dump-single-json", subscriptionsURL}
 	if s.cfg.CookiesFile != "" {
 		args = append(args, "--cookies", s.cfg.CookiesFile)
 	}
-
 	cmd := exec.CommandContext(ctx, s.cfg.YtDlpPath, args...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -277,11 +223,9 @@ func (s *Service) fetchSubscriptions(ctx context.Context) ([]subscription, error
 		}
 		return nil, fmt.Errorf("yt-dlp failed: %w", err)
 	}
-
 	return parseSubscriptions(out)
 }
 
-// parseSubscriptions разбирает JSON-вывод yt-dlp со списком подписок.
 func parseSubscriptions(raw []byte) ([]subscription, error) {
 	var payload struct {
 		Entries []struct {
@@ -295,7 +239,6 @@ func parseSubscriptions(raw []byte) ([]subscription, error) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, fmt.Errorf("parse yt-dlp json: %w", err)
 	}
-
 	subs := make([]subscription, 0, len(payload.Entries))
 	seen := make(map[string]struct{}, len(payload.Entries))
 	for _, e := range payload.Entries {
@@ -310,95 +253,64 @@ func parseSubscriptions(raw []byte) ([]subscription, error) {
 			continue
 		}
 		seen[channelID] = struct{}{}
-
 		url := e.URL
 		if url == "" {
 			url = "https://www.youtube.com/channel/" + channelID
 		}
-
 		subs = append(subs, subscription{
-			ChannelID:   channelID,
-			Title:       e.Title,
-			URL:         url,
-			Description: e.Description,
+			ChannelID: channelID, Title: e.Title, URL: url, Description: e.Description,
 		})
 	}
 	return subs, nil
 }
 
-// validChannelID проверяет формат идентификатора канала YouTube (UC...).
 func validChannelID(id string) bool {
 	return strings.HasPrefix(id, "UC") && len(id) > 10
 }
 
-// fetchChannelVideoTitles получает названия последних N видео канала через yt-dlp.
 func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channelURL string) []string {
 	limit := s.cfg.OLLAMAVideoTitlesLimit
 	if limit <= 0 {
 		limit = 10
 	}
-
 	playlistURL := channelURL
 	if playlistURL == "" {
 		playlistURL = "https://www.youtube.com/channel/" + channelID
 	}
-
 	parsedURL, err := url.Parse(playlistURL)
 	if err == nil {
 		playlistURL = parsedURL.String()
 	}
-
-	args := []string{
-		"--flat-playlist",
-		"--no-warnings",
-		fmt.Sprintf("--playlist-end=%d", limit),
-		"--dump-single-json",
-	}
-
+	args := []string{"--flat-playlist", "--no-warnings", fmt.Sprintf("--playlist-end=%d", limit), "--dump-single-json"}
 	if s.cfg.CookiesFile != "" {
 		args = append(args, "--cookies", s.cfg.CookiesFile)
 	}
-
 	args = append(args, playlistURL)
-
 	cmd := exec.CommandContext(ctx, s.cfg.YtDlpPath, args...)
 	out, err := cmd.Output()
 	if err != nil {
-		s.log.Error("channels.fetch_video_titles_failed",
-			"channel_id", channelID,
-			"error", err.Error(),
-			"описание", "ОШИБКА: Не удалось получить названия видео канала для классификации",
-		)
+		s.log.Error("channels.fetch_video_titles_failed", "channel_id", channelID, "error", err.Error(),
+			"описание", "ОШИБКА: Не удалось получить названия видео канала для классификации")
 		return nil
 	}
-
 	var payload struct {
 		Entries []struct {
 			Title string `json:"title"`
 		} `json:"entries"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
-		s.log.Error("channels.parse_video_titles_failed",
-			"channel_id", channelID,
-			"error", err.Error(),
-			"описание", "ОШИБКА: Не удалось разобрать JSON с названиями видео",
-		)
+		s.log.Error("channels.parse_video_titles_failed", "channel_id", channelID, "error", err.Error(),
+			"описание", "ОШИБКА: Не удалось разобрать JSON с названиями видео")
 		return nil
 	}
-
 	titles := make([]string, 0, len(payload.Entries))
 	for _, entry := range payload.Entries {
 		if entry.Title != "" {
 			titles = append(titles, entry.Title)
 		}
 	}
-
-	s.log.Info("channels.video_titles_fetched",
-		"channel_id", channelID,
-		"count", len(titles),
-		"описание", "Названия видео для классификации успешно получены",
-	)
-
+	s.log.Info("channels.video_titles_fetched", "channel_id", channelID, "count", len(titles),
+		"описание", "Названия видео для классификации успешно получены")
 	return titles
 }
 
@@ -410,7 +322,7 @@ func (s *Service) fetchChannelVideoTitles(ctx context.Context, channelID, channe
 // как отписанные. Возвращает список ID отписавшихся каналов для уведомлений.
 func (s *Service) markUnsubscribed(ctx context.Context, subs []subscription) (int, []string, error) {
 	if len(subs) == 0 {
-		s.log.Warn("channels.unsubscribe_skipped", 
+		s.log.Warn("channels.unsubscribe_skipped",
 			"reason", "empty_subscription_list",
 			"описание", "Проверка отписок пропущена: список подписок пуст")
 		return 0, nil, nil
@@ -494,14 +406,14 @@ func (s *Service) applyUnsubscriptions(ctx context.Context, ids []string, active
 	)
 
 	if len(gone) > 0 {
-		s.log.Info("channels.unsubscribed", 
-			"count", len(gone), 
+		s.log.Info("channels.unsubscribed",
+			"count", len(gone),
 			"ids", gone,
 			"описание", "Каналы успешно помечены как отписанные",
 		)
 	}
 	if resubCount > 0 {
-		s.log.Info("channels.resubscribed", 
+		s.log.Info("channels.resubscribed",
 			"count", resubCount,
 			"описание", "Обнаружены повторные подписки на каналы",
 		)
@@ -555,7 +467,6 @@ func purgeUnsubscribedChannels(ctx context.Context, tx *sql.Tx, gone []string) e
 		return nil
 	}
 
-	// 1. Удаляем записи из trash (по video_id, которые относятся к отписанным каналам)
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM trash 
 		WHERE video_id IN (
@@ -565,7 +476,6 @@ func purgeUnsubscribedChannels(ctx context.Context, tx *sql.Tx, gone []string) e
 		return fmt.Errorf("delete trash: %w", err)
 	}
 
-	// 2. Удаляем файлы в video_files по имени канала (с учетом пробелов)
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM video_files 
 		WHERE TRIM(channel_name) IN (
@@ -575,7 +485,6 @@ func purgeUnsubscribedChannels(ctx context.Context, tx *sql.Tx, gone []string) e
 		return fmt.Errorf("delete video_files: %w", err)
 	}
 
-	// 3. Удаляем основные видео
 	if _, err := tx.ExecContext(ctx, `DELETE FROM videos WHERE channel_id = ANY($1)`, pq.Array(gone)); err != nil {
 		return fmt.Errorf("delete videos: %w", err)
 	}
@@ -583,7 +492,6 @@ func purgeUnsubscribedChannels(ctx context.Context, tx *sql.Tx, gone []string) e
 		return fmt.Errorf("delete videos_new: %w", err)
 	}
 
-	// 4. Записываем журнал событий
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO channels_unsubscribed (channel_id, channel_name, topic, videos_deleted, videos_new_deleted, event)
 		SELECT channel_id, channel_name, topic, 0, 0, 'unsub'

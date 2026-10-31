@@ -56,7 +56,6 @@ func main() {
 		log,
 	)
 	go func() {
-		// Первая проверка сразу при старте
 		err := checker.Check(ctx)
 		checker.SendReport(ctx, err)
 
@@ -73,19 +72,20 @@ func main() {
 		}
 	}()
 
-	// 3. Запуск сбора видео (раз в 3 часа)
+	// 3. Запуск сбора видео (БЕСКОНЕЧНЫЙ ЦИКЛ С ПАУЗОЙ 30 МИНУТ)
 	collector := videos.NewCollector(cfg.YtDlpPath, cfg.CookiesFile, log)
 	go func() {
-		if err := collector.Run(ctx); err != nil {
-			log.Error("videos.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой при сборе видео")
-		}
-
-		ticker := time.NewTicker(3 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			if err := collector.Run(ctx); err != nil {
 				log.Error("videos.failed", "error", err.Error(), "описание", "ОШИБКА: Сбой при сборе видео")
 			}
+			// Пауза 30 минут между циклами
+			time.Sleep(30 * time.Minute)
 		}
 	}()
 
@@ -141,7 +141,6 @@ func main() {
 	log.Info("app.stopped", "описание", "Главный процесс остановлен")
 }
 
-// nextTime возвращает ближайшее время с указанным часом и минутой.
 func nextTime(hour, minute int) time.Time {
 	now := time.Now()
 	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())

@@ -393,3 +393,38 @@ youTobe_transcribe/
 - `GET /healthz` — проверка здоровья сервиса
 
 Порт по умолчанию: `:8081`.
+
+```
+
+- `videos_export.csv` появится в `C:\Users\user\GO\youTobe_transcribe`
+- файл уйдёт в `gdrive:yt_transcribe/videos_export.csv`
+- в логах: `drive_push.file_created`, `drive_push.rclone_start`, `drive_push.done`
+
+### Забрать `results.csv` с Google Drive (drive_pull)
+
+```powershell
+cd C:\Users\user\GO\youTobe_transcribe
+go build -o .\drive_pull.exe .\cmd\drive_pull
+.\drive_pull.exe
+```
+
+- `results.csv` скачается в `C:\Users\user\GO\youTobe_transcribe`
+- `status = ok` + непустой `transcript` → `video_files` (status `pending`), `videos.is_processed = true`
+- `no_speech` / `error` → `trash`, `videos.is_processed = true`
+- в логах: `drive_pull.rclone_done`, `drive_pull.done` (`success`, `trash`)
+
+### Ручные команды rclone
+
+```powershell
+rclone copy .\videos_export.csv gdrive:yt_transcribe/ -v    # залить
+rclone copy gdrive:yt_transcribe/results.csv . -v          # скачать
+rclone ls gdrive:yt_transcribe/                            # что лежит
+rclone delete gdrive:yt_transcribe/results.csv             # сбросить
+```
+
+### Важно
+
+- `videos_export.csv` и `results.csv` в `.gitignore` — не коммитятся.
+- `drive_push` берёт только `channel_topic = 'обучение_торговле_на_рынках'`, `ORDER BY published_at DESC`, `LIMIT 500`.
+- Если `results.csv` на Диске ещё нет (Colab не отработал), `drive_pull` упадёт с `drive_pull.rclone_failed` — повторить после Colab.
+- `drive_pull` не удаляет `results.csv` на Диске; при следующем запуске он перезапишется.

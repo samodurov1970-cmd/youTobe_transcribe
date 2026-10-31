@@ -109,17 +109,19 @@ services:
   transcribe:
     build: .
     container_name: transcribe
-    restart: unless-stopped
+    restart: "no"
     working_dir: /app/n8n
     command: ["/app/n8n/transcribe"]
     environment:
       - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
       - YT_DLP_PATH=/usr/local/bin/yt-dlp
       - COOKIES_FILE=/cookies/cookies.txt
-      - TRANSCRIPTION_URL=${TRANSCRIPTION_URL:-https://groq-whisper-proxy.matsgraaf17.workers.dev}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - APP_ENV=${APP_ENV:-production}
       - TZ=Europe/Minsk
+      - TRANSCRIBE_SESSION_HOURS=${TRANSCRIBE_SESSION_HOURS:-15m}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
     volumes:
       - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
     depends_on:
@@ -145,6 +147,47 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - APP_ENV=${APP_ENV:-production}
       - TZ=Europe/Minsk
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  classifier:
+    build: .
+    container_name: classifier
+    restart: unless-stopped
+    working_dir: /app/n8n
+    command: ["/app/n8n/classifier"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  publisher:
+    build: .
+    container_name: publisher
+    restart: unless-stopped
+    working_dir: /app/n8n
+    command: ["/app/n8n/publisher"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
+      - OBSIDIAN_PATH=/obsidian/DB_Obsidian/Обучение_торговле_на_рынках
+    volumes:
+      - C:/Users/user/Obsidian:/obsidian
     depends_on:
       postgres:
         condition: service_healthy

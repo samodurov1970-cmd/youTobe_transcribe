@@ -22,16 +22,16 @@ func log() *slog.Logger {
 
 // VideoFile — строка таблицы video_files.
 type VideoFile struct {
-	ID           int
-	VideoID      string
-	ChannelName  string
-	VideoURL     string
-	FileName     string
-	FileContent  string
-	Status       string
-	IsProcessed  bool
-	ChannelTopic string
-	LastError    string // <-- ДОБАВЛЕНО
+	ID               int
+	VideoID          string
+	ChannelName      string
+	VideoURL         string
+	FileName         string
+	FileContent      string
+	ChannelTopic     string
+	ValidationStatus string
+	ValidationReason string
+	IsInObsidian     bool
 }
 
 // Init открывает подключение к PostgreSQL и проверяет его.

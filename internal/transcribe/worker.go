@@ -85,6 +85,7 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 				ChannelName: v.ChannelName,
 				VideoURL:    v.VideoURL,
 				Reason:      fmt.Sprintf("пропущено: слишком длинное (%d сек)", duration),
+				Source:      "transcribe",
 			})
 			_ = storage.MarkVideoProcessed(v.VideoID)
 			return nil
@@ -100,6 +101,7 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 				ChannelName: v.ChannelName,
 				VideoURL:    v.VideoURL,
 				Reason:      fmt.Sprintf("пропущено: слишком короткое (%d сек)", duration),
+				Source:      "transcribe",
 			})
 			_ = storage.MarkVideoProcessed(v.VideoID)
 			return nil
@@ -122,14 +124,13 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 				VideoID:     v.VideoID,
 				ChannelName: v.ChannelName,
 				VideoURL:    v.VideoURL,
-				LastError:   errText,
 				Reason:      "error: видео недоступно",
+				Source:      "transcribe",
 			})
 			_ = storage.MarkVideoProcessed(v.VideoID)
 			return nil
 		}
 
-		_ = storage.MarkVideoFailed(v.VideoID, fileName, "error: "+errText)
 		return fmt.Errorf("download audio: %w", err)
 	}
 	defer ytdlp.Cleanup(audioPath)
@@ -152,8 +153,8 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 			VideoID:     v.VideoID,
 			ChannelName: v.ChannelName,
 			VideoURL:    v.VideoURL,
-			LastError:   errText,
 			Reason:      "error: ошибка транскрибации",
+			Source:      "transcribe",
 		})
 		_ = storage.MarkVideoProcessed(v.VideoID)
 		return nil
@@ -178,6 +179,7 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 			VideoURL:    v.VideoURL,
 			FileContent: text,
 			Reason:      "no_speech: нет речи или слишком короткий текст",
+			Source:      "transcribe",
 		})
 		_ = storage.MarkVideoProcessed(v.VideoID)
 		return nil

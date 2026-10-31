@@ -19,6 +19,8 @@ type Config struct {
 	DeepgramAPIKey   string
 	// ChannelsUpdateInterval — период обновления списка подписок channels.
 	ChannelsUpdateInterval time.Duration
+	// TranscribeSessionDuration — время работы сессии транскрибации (таймаут).
+	TranscribeSessionDuration time.Duration
 	// TelegramBotToken — токен Telegram-бота для уведомлений о новых подписках.
 	TelegramBotToken string
 	// TelegramChatID — идентификатор чата Telegram для уведомлений.
@@ -31,6 +33,13 @@ type Config struct {
 	OLLAMATimeout time.Duration
 	// OLLAMAVideoTitlesLimit — сколько последних названий видео запрашивать у yt-dlp для классификации.
 	OLLAMAVideoTitlesLimit int
+	// Classifier settings
+	ClassifierInterval  time.Duration
+	ClassifierBatchSize int
+	SummaryChunkSize    int
+	// Publisher settings
+	PublisherInterval  time.Duration
+	PublisherBatchSize int
 }
 
 func getEnv(key, def string) string {
@@ -53,8 +62,6 @@ func getEnvInt(key string, def int) int {
 }
 
 // getEnvDuration читает интервал из переменной окружения.
-// Поддерживаются значения вида "1m", "30s", "24h" или число секунд.
-// При ошибке разбора используется значение по умолчанию.
 func getEnvDuration(key string, def time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {
@@ -81,13 +88,18 @@ func Load() Config {
 		TranscriptionURL:       getEnv("TRANSCRIPTION_URL", "https://groq-whisper-proxy.matsgraaf17.workers.dev"),
 		DeepgramAPIKey:         getEnv("DEEPGRAM_API_KEY", ""),
 		ChannelsUpdateInterval: getEnvDuration("CHANNELS_UPDATE_INTERVAL", 24*time.Hour),
+		TranscribeSessionDuration: getEnvDuration("TRANSCRIBE_SESSION_HOURS", 2*time.Hour),
 		TelegramBotToken:       getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramChatID:         getEnv("TELEGRAM_CHAT_ID", ""),
-		// OLLAMA settings for LLM-based topic classification.
 		OLLAMAURL:              getEnv("OLLAMA_URL", "http://ollama:11434"),
 		OLLAMAModel:            getEnv("OLLAMA_MODEL", "qwen2.5:1.5b"),
 		OLLAMATimeout:          getEnvDuration("OLLAMA_TIMEOUT", 15*time.Second),
 		OLLAMAVideoTitlesLimit: getEnvInt("OLLAMA_VIDEO_TITLES_LIMIT", 10),
+		ClassifierInterval:     getEnvDuration("CLASSIFIER_INTERVAL", 2*time.Minute),
+		ClassifierBatchSize:    getEnvInt("CLASSIFIER_BATCH_SIZE", 1),
+		SummaryChunkSize:       getEnvInt("SUMMARY_CHUNK_SIZE", 20000),
+		PublisherInterval:      getEnvDuration("PUBLISHER_INTERVAL", 1*time.Minute),
+		PublisherBatchSize:     getEnvInt("PUBLISHER_BATCH_SIZE", 1),
 	}
 }
 
