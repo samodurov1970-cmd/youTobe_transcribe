@@ -30,11 +30,14 @@ chunking:
 retrieval:
   top_k_candidates: 60
   top_k_final: 15
-  max_chunks_per_channel: 4
-  similarity_threshold: 0.75
+  max_chunks_per_channel: 3
+  similarity_threshold: 0.5
   dedup_threshold: 0.95
   exclude_orphans: true
   exclude_ads: true
+  use_reranker: true
+  reranker_model: "BAAI/bge-reranker-v2-m3"
+  rerank_threshold: 0.005
 
 answer:
   language: "ru"
