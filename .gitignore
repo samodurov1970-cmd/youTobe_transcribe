@@ -17,11 +17,41 @@ Thumbs.db
 # Logs
 *.log
 
-# Large files (>100MB)
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ML cache
+.cache/
+*.safetensors
+*.bin
+*.pt
+
+# Local DB dumps
+backup/
+backup_before_pgvector.sql
+*.sql.bak
+
+# Large files
 backup/pg_dumpall_*.sql
 n8n_workflow_backup.sql
-
-backup/
 videos_export.csv
 temp.txt
 results.csv
+
+# Temp scripts
+temp_check.py
+check_db.py
+
+# Obsidian vault (локально)
+obsidian/
+
+# Временные файлы ошибок
+*.txt
+!requirements.txt
+!NOTES_NEXT_SESSION.md

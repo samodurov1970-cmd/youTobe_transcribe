@@ -1,0 +1,45 @@
+embedding:
+  provider: "local"
+  local:
+    model_name: "intfloat/multilingual-e5-base"
+    device: "cpu"
+    batch_size: 16
+    dimension: 768
+  jina:
+    api_key: "${JINA_API_KEY:}"
+    model: "jina-embeddings-v3"
+    dimension: 768
+    base_url: "https://api.jina.ai/v1/embeddings"
+  cohere:
+    api_key: "${COHERE_API_KEY:}"
+    model: "embed-multilingual-v3.0"
+    dimension: 1024
+    base_url: "https://api.cohere.ai/v1/embed"
+  gemini:
+    api_key: "${GEMINI_API_KEY:}"
+    model: "text-embedding-004"
+    dimension: 768
+    base_url: "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent"
+
+chunking:
+  max_chars: 2000
+  overlap_percent: 15
+  split_by_sentences: true
+  languages: ["ru", "en"]
+
+retrieval:
+  top_k_candidates: 60
+  top_k_final: 15
+  max_chunks_per_channel: 4
+  similarity_threshold: 0.75
+  dedup_threshold: 0.95
+  exclude_orphans: true
+  exclude_ads: true
+
+answer:
+  language: "ru"
+  sections:
+    - "Согласно вашей базе"
+    - "Что я думаю согласно моим базам"
+    - "Итоговый вывод — как действовать"
+  require_citations: true
