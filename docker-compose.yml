@@ -1,39 +1,42 @@
 services:
-  n8n:
-    image: n8nio/n8n
-    container_name: n8n
-    restart: unless-stopped
-    ports:
-      - "5678:5678"
-    environment:
-      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
-      - N8N_HOST=localhost
-      - N8N_PORT=5678
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-false}
-      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-admin}
-      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
-      - VUE_APP_URL_BASE_API=/
-      - TZ=Europe/Minsk
-    volumes:
-      - n8n_n8n_data:/home/node/.n8n
-    networks:
-      - default
-      - n8n_default
-    depends_on:
-      postgres:
-        condition: service_healthy
+  # ==========================================
+  # n8n закомментирован, так как для транскрибации он не нужен
+  # ==========================================
+  # n8n:
+  #   image: n8nio/n8n
+  #   container_name: n8n
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5678:5678"
+  #   environment:
+  #     - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
+  #     - N8N_HOST=localhost
+  #     - N8N_PORT=5678
+  #     - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+  #     - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-false}
+  #     - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+  #     - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-admin}
+  #     - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+  #     - VUE_APP_URL_BASE_API=/
+  #     - TZ=Europe/Minsk
+  #   volumes:
+  #     - n8n_n8n_data:/home/node/.n8n
+  #   networks:
+  #     - default
+  #     - n8n_default
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
 
   postgres:
     image: pgvector/pgvector:pg15
     container_name: postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: peter
-      POSTGRES_PASSWORD: peter
-      POSTGRES_DB: youtube_tracker
-      TZ: Europe/Minsk
+      - POSTGRES_USER=peter
+      - POSTGRES_PASSWORD=peter
+      - POSTGRES_DB=youtube_tracker
+      - TZ=Europe/Minsk
     ports:
       - "5432:5432"
     volumes:
@@ -48,82 +51,76 @@ services:
       - default
       - n8n_default
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    restart: unless-stopped
-    ports:
-      - "11435:11434"
-    environment:
-      - TZ=Europe/Minsk
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/11434 || exit 1'"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-    networks:
-      - default
+  # ==========================================
+  # Ollama закомментирована, чтобы не забирать VRAM у Whisper
+  # ==========================================
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   restart: unless-stopped
+  #   ports:
+  #     - "11435:11434"
+  #   environment:
+  #     - TZ=Europe/Minsk
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/11434 || exit 1'"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 10
+  #     start_period: 60s
+  #   networks:
+  #     - default
 
-  main:
-    build: .
-    container_name: main
-    restart: unless-stopped
-    working_dir: /app/n8n
-    command: ["/app/n8n/main"]
-    environment:
-      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
-      - OBSIDIAN_PATH=/obsidian
-      - YT_DLP_PATH=/usr/local/bin/yt-dlp
-      - COOKIES_FILE=/cookies/cookies.txt
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-nvidia/nemotron-3-ultra-550b-a55b:free}
-      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
-      - TRANSCRIPTION_URL=${TRANSCRIPTION_URL:-https://groq-whisper-proxy.matsgraaf17.workers.dev}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - APP_ENV=${APP_ENV:-production}
-      - CHANNELS_UPDATE_INTERVAL=${CHANNELS_UPDATE_INTERVAL:-60m}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
-      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-15s}
-      - OLLAMA_VIDEO_TITLES_LIMIT=${OLLAMA_VIDEO_TITLES_LIMIT:-10}
-      - TZ=Europe/Minsk
-    volumes:
-      - C:/Users/user/Obsidian:/obsidian
-      - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
-    depends_on:
-      postgres:
-        condition: service_healthy
-      ollama:
-        condition: service_started
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+  # ==========================================
+  # main закомментирован (не нужен для транскрибации)
+  # ==========================================
+  # main:
+  #   build: .
+  #   container_name: main
+  #   restart: unless-stopped
+  #   working_dir: /app/n8n
+  #   command: ["/app/n8n/main"]
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
+  #     - OBSIDIAN_PATH=/obsidian
+  #     - YT_DLP_PATH=/usr/local/bin/yt-dlp
+  #     - COOKIES_FILE=/cookies/cookies.txt
+  #     - OLLAMA_URL=http://ollama:11434
+  #     - TZ=Europe/Minsk
+  #   volumes:
+  #     - ./internal/cookies/cookies.txt:/cookies/cookies.txt
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
 
   transcribe:
     build: .
     container_name: transcribe
-    restart: "no"
+    restart: unless-stopped
     working_dir: /app/n8n
     command: ["/app/n8n/transcribe"]
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
       - YT_DLP_PATH=/usr/local/bin/yt-dlp
       - COOKIES_FILE=/cookies/cookies.txt
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - APP_ENV=${APP_ENV:-production}
       - TZ=Europe/Minsk
-      - TRANSCRIBE_SESSION_HOURS=${TRANSCRIBE_SESSION_HOURS:-15m}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - TRANSCRIBE_SESSION_HOURS=0
+      - WHISPER_MODEL=medium
+      - WHISPER_DEVICE=cuda
+      - WHISPER_COMPUTE=float16
     volumes:
-      - C:/Users/user/GO/youTobe_transcribe/internal/cookies/cookies.txt:/cookies/cookies.txt
+      - ./internal/cookies/cookies.txt:/cookies/cookies.txt
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,79 +129,32 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
-  webui:
-    build: .
-    container_name: webui
-    restart: unless-stopped
-    working_dir: /app/n8n
-    command: ["/app/n8n/webui"]
-    ports:
-      - "8081:8081"
-    environment:
-      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
-      - WEBUI_ADDR=:8081
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - APP_ENV=${APP_ENV:-production}
-      - TZ=Europe/Minsk
-    depends_on:
-      postgres:
-        condition: service_healthy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  classifier:
-    build: .
-    container_name: classifier
-    restart: unless-stopped
-    working_dir: /app/n8n
-    command: ["/app/n8n/classifier"]
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
-    depends_on:
-      postgres:
-        condition: service_healthy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  publisher:
-    build: .
-    container_name: publisher
-    restart: unless-stopped
-    working_dir: /app/n8n
-    command: ["/app/n8n/publisher"]
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=postgres://peter:peter@postgres:5432/youtube_tracker?sslmode=disable
-      - OBSIDIAN_PATH=/obsidian/DB_Obsidian/Обучение_торговле_на_рынках
-    volumes:
-      - C:/Users/user/Obsidian:/obsidian
-    depends_on:
-      postgres:
-        condition: service_healthy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+  # ==========================================
+  # webui, classifier, publisher закомментированы
+  # ==========================================
+  # webui:
+  #   build: .
+  #   ...
+  # classifier:
+  #   build: .
+  #   ...
+  # publisher:
+  #   build: .
+  #   ...
 
 volumes:
   n8n_postgres_data:
-    external: true
   n8n_n8n_data:
-    external: true
-  ollama_data:
-    external: false
+  # ollama_data:
 
 networks:
   n8n_default:
-    external: true
+    driver: bridge

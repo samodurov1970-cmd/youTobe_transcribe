@@ -18,7 +18,8 @@ func Args(extra ...string) []string {
 		"--js-runtimes", "deno",
 		"--remote-components", "ejs:github",
 		"--no-playlist",
-		"--extractor-args", "youtube:player_client=web,mweb",
+		"--extractor-args", "youtube:player_client=mweb",
+		"--extractor-args", "youtubepot-bgutilhttp:base_url=http://bgutil-provider:4416",
 	}
 	return append(base, extra...)
 }
@@ -52,8 +53,6 @@ func GetDuration(ytDlpPath, videoURL string) (int, error) {
 		return 0, err
 	}
 
-	// yt-dlp может выводить WARNING в stdout перед длительностью.
-	// Берем последнюю непустую строку, в ней должна быть длительность.
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	var raw string
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -67,7 +66,6 @@ func GetDuration(ytDlpPath, videoURL string) (int, error) {
 		return 0, fmt.Errorf("empty duration")
 	}
 
-	// Парсим формат "HH:MM:SS" или "MM:SS" или просто секунды
 	parts := strings.Split(raw, ":")
 	switch len(parts) {
 	case 3:
@@ -97,7 +95,9 @@ func DownloadAudio(ytDlpPath, videoURL string) (string, error) {
 		"video_url", videoURL,
 		"yt_dlp_path", ytDlpPath,
 	)
-	out, err := Run(ytDlpPath, "--cookies", "/cookies/cookies.txt", "-x", "--audio-format", "mp3", "-o", "/tmp/%(id)s.%(ext)s", videoURL)
+	out, err := Run(ytDlpPath, "--cookies", "/cookies/cookies.txt",
+		"-f", "bestaudio[ext=m4a]/bestaudio/best",
+		"-o", "/tmp/%(id)s.%(ext)s", videoURL)
 	if err != nil {
 		logger.Log.Error("download.failed",
 			logger.Err(err),
@@ -107,17 +107,18 @@ func DownloadAudio(ytDlpPath, videoURL string) (string, error) {
 		return "", fmt.Errorf("yt-dlp download failed: %w (output: %s)", err, out)
 	}
 	candidates := []string{
-		fmt.Sprintf("/tmp/%s.mp3", id),
-		fmt.Sprintf("/tmp/%s.webm", id),
 		fmt.Sprintf("/tmp/%s.m4a", id),
+		fmt.Sprintf("/tmp/%s.webm", id),
+		fmt.Sprintf("/tmp/%s.opus", id),
+		fmt.Sprintf("/tmp/%s.mp3", id),
+		fmt.Sprintf("/tmp/%s.mp4", id),
 	}
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			size, _ := os.Stat(c)
+		if st, err := os.Stat(c); err == nil {
 			logger.Log.Info("download.audio_ready",
 				"video_id", id,
 				"audio_path", c,
-				"file_size_bytes", size.Size(),
+				"file_size_bytes", st.Size(),
 				"duration_ms", time.Since(start).Milliseconds(),
 			)
 			return c, nil

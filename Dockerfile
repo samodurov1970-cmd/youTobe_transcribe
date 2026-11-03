@@ -23,7 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://deno.land/install.sh | sh
 ENV PATH="/root/.deno/bin:${PATH}"
 
-RUN pip install --no-cache-dir yt-dlp yt-dlp-ejs faster-whisper
+RUN pip install --no-cache-dir \
+    "av<19" \
+    yt-dlp yt-dlp-ejs faster-whisper bgutil-ytdlp-pot-provider
 
 WORKDIR /app/n8n
 

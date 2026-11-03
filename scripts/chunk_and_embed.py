@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """
 chunk_and_embed.py — разбивка транскриптов на чанки и вычисление эмбеддингов.
+
 Режимы:
   --mode pilot     Пилот на N видео
-  --mode full      Полная индексация всех видео (перезаписывает)
+  --mode full      Индексация ТОЛЬКО видео со статусом 'queued' в indexing_jobs
 """
 import argparse
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 import numpy as np
 import psycopg2
@@ -55,7 +61,7 @@ class EmbeddingProvider:
 class LocalEmbeddingProvider(EmbeddingProvider):
     def __init__(self, model_name: str = "intfloat/multilingual-e5-base"):
         self.model = SentenceTransformer(model_name)
-        self._dim = self.model.get_sentence_embedding_dimension()
+        self._dim = self.model.get_embedding_dimension()
         self._prefix = "passage: " if "e5" in model_name.lower() else ""
 
     def embed(self, texts: List[str]) -> np.ndarray:
@@ -274,7 +280,9 @@ def get_videos_for_indexing(conn, mode: str, limit: Optional[int] = None) -> Lis
                 """
                 SELECT vf.video_id, vf.channel_name, vf.video_url, vf.file_content
                 FROM public.video_files vf
-                WHERE vf.validation_status IN ('published', 'validated')
+                JOIN public.indexing_jobs ij ON ij.video_id = vf.video_id
+                WHERE ij.status = 'queued'
+                  AND vf.validation_status IN ('published', 'validated')
                   AND vf.file_content IS NOT NULL
                   AND vf.file_content != ''
                 ORDER BY vf.created_at
@@ -288,7 +296,25 @@ def get_videos_for_indexing(conn, mode: str, limit: Optional[int] = None) -> Lis
 def insert_chunks(conn, provider, video_id, channel_name, video_url, transcript_text) -> int:
     chunks = chunk_text(transcript_text)
     if not chunks:
+        now = datetime.now(timezone.utc).isoformat()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO public.indexing_jobs (video_id, status, chunks_count, embedding_model, updated_at)
+                VALUES (%s, 'done', 0, %s, %s)
+                ON CONFLICT (video_id) DO UPDATE
+                    SET status = 'done', chunks_count = 0, embedding_model = %s, updated_at = %s
+                """,
+                (video_id, provider.__class__.__name__, now,
+                 provider.__class__.__name__, now),
+            )
+            cur.execute(
+                "UPDATE public.video_files SET is_chunked = true WHERE video_id = %s",
+                (video_id,),
+            )
+        conn.commit()
         return 0
+
     is_orphan = not video_exists_in_videos_table(conn, video_id)
     embeddings = provider.embed(chunks)
     now = datetime.now(timezone.utc).isoformat()
@@ -310,7 +336,6 @@ def insert_chunks(conn, provider, video_id, channel_name, video_url, transcript_
             rows,
             template="(%s, %s, %s, %s, %s, %s::vector, %s, %s, %s, %s)",
         )
-    with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO public.indexing_jobs (video_id, status, chunks_count, embedding_model, updated_at)
@@ -320,6 +345,10 @@ def insert_chunks(conn, provider, video_id, channel_name, video_url, transcript_
             """,
             (video_id, len(rows), provider.__class__.__name__, now,
              len(rows), provider.__class__.__name__, now),
+        )
+        cur.execute(
+            "UPDATE public.video_files SET is_chunked = true WHERE video_id = %s",
+            (video_id,),
         )
     conn.commit()
     return len(rows)
@@ -332,27 +361,31 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config()
-    print(f"[chunk_and_embed] Режим: {args.mode}")
+    print(f"[chunk_and_embed] Режим: {args.mode}", flush=True)
     provider = create_embedding_provider(config)
-    print(f"[chunk_and_embed] Провайдер: {provider.__class__.__name__}, размерность: {provider.dimension}")
+    print(f"[chunk_and_embed] Провайдер: {provider.__class__.__name__}, размерность: {provider.dimension}", flush=True)
 
     conn = get_db_conn()
     try:
         videos = get_videos_for_indexing(conn, args.mode, args.limit)
-        print(f"[chunk_and_embed] Найдено видео для индексации: {len(videos)}")
+        print(f"[chunk_and_embed] Найдено видео для индексации: {len(videos)}", flush=True)
         total_chunks = 0
         for idx, video in enumerate(videos, 1):
             vid = video["video_id"]
-            print(f"  [{idx}/{len(videos)}] {vid} — {video.get('channel_name', '?')}")
+            print(f"  [{idx}/{len(videos)}] {vid} — {video.get('channel_name', '?')}", flush=True)
             try:
                 n = insert_chunks(conn, provider, vid,
                                   video.get("channel_name", ""),
                                   video.get("video_url", ""),
                                   video.get("file_content", ""))
                 total_chunks += n
-                print(f"    → чанков: {n}")
+                print(f"    -> чанков: {n}", flush=True)
             except Exception as e:
-                print(f"    → ОШИБКА: {e}")
+                print(f"    -> ОШИБКА: {e}", flush=True)
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -365,7 +398,7 @@ def main() -> None:
                          str(e), datetime.now(timezone.utc).isoformat()),
                     )
                 conn.commit()
-        print(f"\n[chunk_and_embed] Готово. Всего чанков: {total_chunks}")
+        print(f"\n[chunk_and_embed] Готово. Всего чанков: {total_chunks}", flush=True)
     finally:
         conn.close()
 

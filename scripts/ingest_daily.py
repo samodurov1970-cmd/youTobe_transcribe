@@ -2,12 +2,9 @@
 """
 ingest_daily.py — ежедневная инкрементальная индексация новых видео.
 
-Запускается по cron/ночью. Обнаруживает новые записи в public.video_files
-со статусом 'published', которые ещё не проиндексированы, и добавляет их
-в очередь индексации (public.indexing_jobs) со статусом 'queued'.
-
-Этот скрипт только ставит в очередь (indexing_jobs). Обработку выполняет
-chunk_and_embed.py --mode full.
+Обнаруживает новые записи в public.video_files со статусом published/validated,
+которых ещё нет в public.indexing_jobs, и ставит их в очередь ('queued').
+Обработку выполняет chunk_and_embed.py --mode full.
 
 Зависимости:
   pip install psycopg2-binary pyyaml
@@ -18,6 +15,10 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 import psycopg2
 import psycopg2.extras
@@ -45,7 +46,7 @@ def get_db_conn() -> psycopg2.extensions.connection:
 def find_unindexed_videos(
     conn: psycopg2.extensions.connection,
 ) -> list:
-    """Находит опубликованные видео с транскриптом, которые ещё не в очереди индексации."""
+    """Находит опубликованные видео с транскриптом, которых ещё нет в очереди."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
@@ -97,7 +98,7 @@ def main() -> None:
     conn = get_db_conn()
     try:
         videos = find_unindexed_videos(conn)
-        print(f"[ingest_daily] Найдено новых видео для индексации: {len(videos)}")
+        print(f"[ingest_daily] Найдено новых видео для индексации: {len(videos)}", flush=True)
 
         if args.dry_run:
             for v in videos:
@@ -105,7 +106,7 @@ def main() -> None:
             return
 
         enqueued = enqueue_indexing_jobs(conn, videos)
-        print(f"[ingest_daily] Добавлено в очередь: {enqueued}")
+        print(f"[ingest_daily] Добавлено в очередь: {enqueued}", flush=True)
     finally:
         conn.close()
 

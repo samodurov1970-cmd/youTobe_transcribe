@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """retrieve_and_answer.py — retrieval + rerank + промпт в 3 раздела.
 
+Модели кешируются в памяти процесса (lru_cache).
+
 Конвейер:
-  1. e5-base bi-encoder: топ-40 кандидатов по cosine similarity.
+  1. e5-base bi-encoder: топ-N кандидатов по cosine similarity.
   2. Cross-encoder reranker: пересчёт пары (query, chunk).
   3. Фильтр по rerank_threshold.
   4. Дедуп по соседним chunk_index (одно видео).
@@ -11,6 +13,7 @@
 """
 import argparse
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List
 
@@ -38,8 +41,20 @@ def get_db_conn():
     return psycopg2.connect(db_url)
 
 
+@lru_cache(maxsize=2)
+def _get_embedder(model_name: str) -> SentenceTransformer:
+    print(f"[cache] loading embedder {model_name}")
+    return SentenceTransformer(model_name)
+
+
+@lru_cache(maxsize=2)
+def _get_reranker(model_name: str) -> CrossEncoder:
+    print(f"[cache] loading reranker {model_name}")
+    return CrossEncoder(model_name, max_length=512)
+
+
 def embed_query(question: str, model_name: str) -> List[float]:
-    model = SentenceTransformer(model_name)
+    model = _get_embedder(model_name)
     prefix = "query: " if "e5" in model_name.lower() else ""
     emb = model.encode([prefix + question], convert_to_numpy=True,
                        normalize_embeddings=True)[0]
@@ -78,8 +93,8 @@ def rerank(question: str, chunks: List[dict], config: dict) -> List[dict]:
 
     model_name = rc.get("reranker_model", "BAAI/bge-reranker-v2-m3")
     threshold = rc.get("rerank_threshold", 0.005)
+    model = _get_reranker(model_name)
 
-    model = CrossEncoder(model_name, max_length=512)
     pairs = [(question, c["chunk_text"]) for c in chunks]
     scores = model.predict(pairs)
     for c, s in zip(chunks, scores):

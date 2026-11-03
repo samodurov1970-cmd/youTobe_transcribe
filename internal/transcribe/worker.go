@@ -66,7 +66,6 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 		"channel_name", v.ChannelName,
 		"описание", "Начата обработка видео")
 
-	// === 1. ПРОВЕРКА ДЛИТЕЛЬНОСТИ ===
 	duration, err := ytdlp.GetDuration(w.YtDlpPath, v.VideoURL)
 	if err != nil {
 		w.Log.Warn("transcribe.duration_failed",
@@ -74,7 +73,7 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 			"error", err.Error(),
 			"описание", "Не удалось получить длительность видео, пропускаем проверку")
 	} else {
-		if duration > 3600 {
+		if duration > 36000 {
 			w.Log.Warn("transcribe.skipped",
 				"video_id", v.VideoID,
 				"status", "skipped_too_long",
@@ -109,7 +108,6 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 		w.Log.Info("transcribe.duration_ok", "video_id", v.VideoID, "duration", duration, "описание", "Длительность видео в допустимых пределах")
 	}
 
-	// === 2. СКАЧИВАНИЕ ===
 	audioPath, err := ytdlp.DownloadAudio(w.YtDlpPath, v.VideoURL)
 	if err != nil {
 		errText := err.Error()
@@ -119,7 +117,8 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 			"описание", "ОШИБКА: Не удалось скачать аудио")
 
 		if strings.Contains(errText, "404") || strings.Contains(errText, "403") ||
-			strings.Contains(errText, "Video unavailable") || strings.Contains(errText, "Private video") {
+			strings.Contains(errText, "Video unavailable") || strings.Contains(errText, "Private video") ||
+			strings.Contains(errText, "members-only") || strings.Contains(errText, "Join this channel") {
 			_ = storage.InsertTrash(storage.Trash{
 				VideoID:     v.VideoID,
 				ChannelName: v.ChannelName,
@@ -140,7 +139,6 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 		"audio_path", audioPath,
 		"описание", "Аудио успешно скачано")
 
-	// === 3. ТРАНСКРИБАЦИЯ ===
 	text, err := File(audioPath)
 	if err != nil {
 		errText := err.Error()
@@ -165,7 +163,6 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 		"text_len", len(text),
 		"описание", "Транскрипция получена")
 
-	// === 4. ПРОВЕРКА НА "НЕТ РЕЧИ" ===
 	words := len(strings.Fields(text))
 	if len(text) < 10 || words < 3 {
 		w.Log.Warn("transcribe.no_speech",
@@ -185,7 +182,6 @@ func (w *Worker) processVideo(ctx context.Context, v storage.Video) error {
 		return nil
 	}
 
-	// === 5. СОХРАНЕНИЕ УСПЕШНОГО ===
 	vf := storage.VideoFile{
 		VideoID:      v.VideoID,
 		ChannelName:  v.ChannelName,
